@@ -23,6 +23,7 @@
 | seed dev | ตาม `seedDb()` ของ mock ทั้งหมด (+ ผลของ migration ใน mock เช่นสต็อกยกมา) — `db/seed` เปิดเฉพาะ dev / test (ไม่ลง production) |
 | อีเมล | เลื่อนไปทีหลัง — interface `Mailer` + ตัวที่ log ว่า "ส่งแล้ว" (ไม่ log ลิงก์ / token / อีเมลเต็ม) |
 | test | JUnit 5 + AssertJ + Spring Boot Test (MockMvc) + Testcontainers |
+| ข้อมูลส่วนบุคคล | เข้ารหัสในแอป AES-256-GCM เฉพาะคอลัมน์อ่อนไหว + HMAC-SHA256 ไว้ค้นหา (หัวข้อ "ข้อมูลส่วนบุคคล") |
 
 ## โครง repo / package (`com.an22.api`)
 
@@ -33,7 +34,7 @@ src/main/java/com/an22/api/
   Application.java
   config/       ค่าจาก env (ApiProperties), Clock (Asia/Bangkok), Jackson (null ไม่ละ, ISO-8601)
   security/     JwtService (ออก / ตรวจ), SecurityConfig (chain ร้าน / platform), CurrentUser, ClientIp (X-Real-IP)
-  db/           TenantTx — เปิด transaction + `set_config('app.tenant_id', ?, true)` (= SET LOCAL), DocNumbers (ตัวนับเลขเอกสาร)
+  db/           TenantTx — เปิด transaction + `set_config('app.tenant_id' / 'app.user_id' / 'app.actor_kind', ?, true)` (= SET LOCAL), DocNumbers (ตัวนับเลขเอกสาร)
   web/          ApiException(status, message), ErrorHandler → `{ message }`, BranchContext (X-Branch-Id), TerminalContext (X-Terminal-Id), CostHidingAdvice (hideCost จุดเดียว)
   rules/        **port จาก core/models — pure Java ไม่ผูก Spring** 1 class ต่อ 1 ไฟล์ TS: PosPricing, PosPayment, PaymentMethodRules, PromotionRules, PriceRules,
                 Costing, SerialRules, ProductRules, CategoryRules, Suppliers, TransferRules, SaleRules, CreditNoteRules, ExchangeRules, TaxInvoiceRules,
@@ -73,8 +74,26 @@ scripts/db-apply.sh              รันด้วยมือ: `roles.sql` (�
 ### Schema
 - ทุกตารางข้อมูล: `tenant_id bigint not null` (+ `branch_id` ตามระดับใน `data-model.md`), `ENABLE` + `FORCE ROW LEVEL SECURITY`,
   policy `USING / WITH CHECK (tenant_id = current_setting('app.tenant_id', true)::bigint)` — ไม่ตั้งค่า = ไม่เห็นอะไรเลย
-- FK รวม `(tenant_id, id)` กันอ้างข้ามบริษัท; index / unique ขึ้นต้นด้วย `tenant_id`; ชื่อ snake_case
+- index / unique ขึ้นต้นด้วย `tenant_id`; ชื่อ snake_case
+- **FK** (ตกลงแล้ว 2026-10-20):
+  - **มี FK** ทุกความสัมพันธ์หลัก (เช่น `sale_lines → sales / products`, `branch_stock → branches`, `shifts → pos_terminals`) แบบรวม `(tenant_id, <ref>_id) → (tenant_id, id)`
+    — RLS ไม่ตรวจว่า id ที่อ้างเป็นของบริษัทไหน FK รวม tenant ให้ DB ปฏิเสธการอ้างข้ามบริษัทเอง (ตารางแม่มี `UNIQUE (tenant_id, id)`)
+  - `ON DELETE RESTRICT` (ไม่ cascade) — แอปตรวจ "มีเอกสารอ้าง → ลบไม่ได้" ก่อนเพื่อตอบข้อความไทย, FK เป็นตาข่ายชั้นสุดท้าย
+  - **ทุก FK ต้องมี index ฝั่งตารางลูก** (PostgreSQL ไม่สร้างให้) ขึ้นต้นด้วย `tenant_id`
+  - **ไม่มี FK (index ธรรมดา)**: `created_by` / `updated_by`, `audit_log.user_id` / ref (ประวัติต้องอยู่แม้ record ถูกลบ),
+    snapshot ในเอกสาร (ชื่อสินค้า, ชื่อช่องทาง, `pos_id`, ชื่อผู้ขาย), ข้างใน `held_bills.payload` (jsonb)
+  - purge บริษัท (ขั้น 12) ลบตามลำดับลูก → แม่ (รายการตารางเรียงไว้ในโค้ดที่เดียว + test ว่าครบทุกตารางที่มี `tenant_id`)
 - เงิน `numeric(14,2)`, เวลา `timestamptz`, วันที่ธุรกิจ `date`, enum = `text` + `CHECK`; ห้ามลบเอกสาร (มีแต่เปลี่ยนสถานะ)
+- **คอลัมน์ผู้ทำ / เวลา ทุกตาราง** (ตกลงแล้ว 2026-10-20):
+  - `created_at timestamptz not null`, `created_by bigint` = ผู้ insert ครั้งแรก
+  - `updated_at timestamptz not null`, `updated_by bigint` = ผู้แก้ล่าสุด (ตอน insert = ค่าเดียวกับ created)
+  - ตาราง append-only (`audit_log`, `stock_movements`, `shift_adjustments`, `cash_movements`, `drawer_opens`) มีแค่ `created_*` (แก้ไม่ได้อยู่แล้ว)
+  - ตั้งด้วย **trigger** `set_row_stamp()` (BEFORE INSERT / UPDATE) จาก `now()` + `current_setting('app.user_id', true)` — แอปลืมใส่ไม่ได้;
+    UPDATE ทับ `created_*` ไม่ได้ (trigger คืนค่าเดิม)
+  - `*_by` ไม่ทำ FK (ผู้ใช้ถูกลบได้ แต่ประวัติต้องอยู่) และบอกชนิดผู้ทำใน `created_by_kind` / `updated_by_kind` (`text` + `CHECK`, จาก `app.actor_kind`):
+    `user` → `*_by` = `users.id` · `platform` → id ของ `platform_admins` · `system` (job ของ api, seed) → `*_by` = `null`
+  - ตาราง platform (`companies`, `billing_invoices`, …) ใช้กติกาเดียวกัน (`*_by` = ผู้ใช้ร้านตอนสมัคร / เปลี่ยนแพ็กเกจ หรือ platform admin)
+  - **ไม่ส่งออก API** (interface TS ไม่มี field นี้ — ใช้ดูใน DB / export บริษัท); ไม่แทน field ธุรกิจเดิม (`cashier`, `voidedBy`, `createdBy` ของบิลพัก ฯลฯ ยังเก็บตาม spec)
 - ตาราง platform (`companies`, `billing_invoices`, `platform_admins`, `password_reset_tokens`, ตารางนับ login ผิด) ไม่อยู่ใต้ RLS
 - DB role 3 ตัว (สร้างด้วย `db/roles.sql` — ต้องใช้ superuser จึงไม่อยู่ใน migration; รหัสผ่านจาก env / ตัวแปร psql — ไม่อยู่ใน repo; migration ทำ grant):
   - `an22_owner` — เจ้าของตาราง, Flyway ใช้ตัวนี้เท่านั้น
@@ -83,13 +102,25 @@ scripts/db-apply.sh              รันด้วยมือ: `roles.sql` (�
   - แอปมี DataSource 2 ตัว (app / platform); ห้ามใช้ `SET` แบบ session (connection pool)
 - เลขเอกสาร: ตาราง `doc_counters (tenant_id, prefix, last_no)` + `INSERT … ON CONFLICT DO UPDATE … RETURNING` (ล็อกแถว ไม่ชนเมื่อขายพร้อมกัน); วันในเลข = วันท้องถิ่น Asia/Bangkok
 
+### ข้อมูลส่วนบุคคล (ตกลงแล้ว 2026-10-20)
+- **เข้ารหัสในแอป** (`security/PiiCipher`, AES-256-GCM, nonce สุ่มต่อค่า) เก็บเป็น `bytea` ขึ้นต้นด้วยเลข version ของกุญแจ (หมุนกุญแจได้: อ่านได้ทุก version, เขียนด้วยตัวล่าสุด)
+  - ผู้ซื้อในใบกำกับ / ใบลดหนี้ (`TaxInvoiceBuyer`: ชื่อ, `idType`, เลขผู้เสียภาษี / บัตรประชาชน / passport, สาขา, ที่อยู่) → `buyer_enc bytea` ทั้งก้อน
+    + `buyer_tax_id_hash bytea` = HMAC-SHA256 (กุญแจแยก) ของเลขที่ normalize แล้ว + index — ใช้กับ `GET /tax-invoices/buyer?taxId=` (ค้นได้แบบตรงทั้งเลขเท่านั้น)
+  - `held_bills.payload` → `payload_enc bytea` ทั้งก้อน (ไม่ query ข้างใน)
+- กุญแจจาก env (`PII_KEYS` = `<version>:<base64 32 byte>,…`, `PII_HASH_KEY`) — ไม่อยู่ใน DB / repo / log; ไม่ตั้ง = ไม่ start; **สำรองกุญแจแยกจาก backup ของ DB** (กุญแจหาย = ข้อมูลผู้ซื้อหาย) — เขียนไว้ใน `CLAUDE.md` / `db/README.md`
+- **ไม่ใช้** pgcrypto (กุญแจผ่าน SQL → อาจลง log / `pg_stat_statements`), ไม่ hash อย่างเดียว (ต้องพิมพ์ใบกำกับได้)
+- **เก็บ text ตามเดิม**: อีเมล / ชื่อผู้ใช้ (ต้อง unique + login), ข้อมูลบริษัท / สาขา / ผู้จำหน่าย (ข้อมูลธุรกิจที่พิมพ์บนเอกสาร) — ป้องกันด้วย RLS + เข้ารหัส disk / backup + ไม่ log
+- **บัตรเครดิต: ไม่เก็บเลขบัตรเต็มเด็ดขาด** (PCI DSS) — `SalePayment.reference` ที่เป็นตัวเลข 13–19 หลัก (ตัด ช่องว่าง / `-`) และผ่าน Luhn → 400; เก็บได้แค่เลขอนุมัติ / 4 หลักท้าย
+  — **เปลี่ยน spec**: แก้ใน `../FrontEnd-An22` ก่อนขั้น 9 (กฎใน `core/models` + mock + spec + `api-contract.md` / `domain-rules.md` + ช่องกรอกที่ POS ตรวจเหมือนกัน, commit เดียว) ข้อความ error ยืนยันกับผู้ใช้ตอนนั้น
+- ค่าที่ถอดรหัสแล้วไม่ลง log / ข้อความ error; export บริษัท (owner) ถอดรหัสให้
+
 ### Request
 - JWT: claims `sub`, `tenantId`, `role`, `branchIds` / `allBranches`; ร้าน vs platform แยกด้วย `aud` (`shop` / `platform`) — ใช้สลับกัน → 401; อายุ `JWT_TTL_DAYS` (ค่าเริ่ม 7)
 - ทุก request ของร้าน: อ่านผู้ใช้ + บริษัทจาก DB (สิทธิ์สาขามีผลทันที) — บริษัทไม่ active / ผู้ใช้ปิด / ลบแล้ว → 401
 - `X-Branch-Id`: ตรวจทุก request ยกเว้น `GET /me` (ไม่ใช่สาขาที่ใช้งาน / เข้าไม่ได้ → 403 "ไม่มีสิทธิ์ทำงานในสาขานี้"; งานเขียนสต็อก / ขาย / กะไม่มี → 400 ตาม E17 / E24)
 - `X-Terminal-Id`: ตรวจว่าเป็นเครื่องของ tenant (audit `terminalId` = null ถ้าไม่ใช่)
 - error ทุกตัว `{ "message": "<ไทย>" }` ข้อความตาม mock ทุกตัวอักษร; JSON ไม่ละ `null`; GET ห้ามแก้ข้อมูล
-- ไม่มีความลับใน repo / log / ข้อความ error: `DB_*_PASSWORD`, `JWT_SECRET` (≥ 32 byte, ไม่ตั้ง = ไม่ start) จาก env; ไม่ log body ของ auth / header Authorization
+- ไม่มีความลับใน repo / log / ข้อความ error: `DB_*_PASSWORD`, `JWT_SECRET`, `PII_KEYS`, `PII_HASH_KEY` (≥ 32 byte, ไม่ตั้ง = ไม่ start) จาก env; ไม่ log body ของ auth / header Authorization
 
 ### ทุกขั้นย่อย (Definition of done)
 1. migration ใหม่ apply บน DB ว่างผ่าน (`./mvnw verify` ใช้ Testcontainers เริ่มจากศูนย์ทุกครั้ง)
@@ -105,6 +136,7 @@ scripts/db-apply.sh              รันด้วยมือ: `roles.sql` (�
 - `db/README.md`, `db/roles.sql`, `scripts/db-apply.sh` (ทดสอบ: DB ว่าง → `--roles --seed` ผ่าน, รันซ้ำไม่ทำอะไร)
 - `compose.yaml`: `postgres:18` + `docker/initdb.sh` → `db/roles.sql` สร้าง database + role 3 ตัว (รหัสจาก `.env`); `.env.example` (ไม่มีค่าจริง), `.gitignore`
 - config `FLYWAY_MIGRATE` (`true` = migrate ตอน start, `false` = validate อย่างเดียว)
+- `PiiCipher` (เข้ารหัส / ถอด / HMAC, หลาย version) + test: ถอดกลับได้, nonce ไม่ซ้ำ, แก้ byte เดียว → ถอดไม่ได้, กุญแจเก่ายังอ่านได้
 - `application.yml`: context path `/api`, port 8080, Jackson ไม่ละ null + ISO-8601, `TZ` ของกฎ = Asia/Bangkok, health `GET /api/healthz`
 - `ApiException` + `ErrorHandler` (`{ message }`, 404 ทั่วไป, 400 JSON อ่านไม่ได้, 500 ไม่เปิดเผยรายละเอียด)
 - test support: Postgres container singleton + Flyway migrate (รวม seed) + MockMvc
@@ -114,7 +146,7 @@ scripts/db-apply.sh              รันด้วยมือ: `roles.sql` (�
 ### ขั้น 1 — schema ฐาน + RLS + seed บริษัท / ผู้ใช้
 - migration `db/migration/V1__base.sql`: grant ให้ role, ตาราง platform (`companies`, `platform_admins`, `billing_invoices`, `password_reset_tokens`), `company_info`, `branches`, `users` (+ `user_branches`, partial unique owner), `menu_access`, `audit_log` (insert-only), `doc_counters`
 - seed (`db/seed/V1_1__seed_demo.sql`): DEMO, HQ (`00000`) + BN, `admin` / `admin` (owner ตาม `fillOwner()`), `somchai` / `1234`, ผู้ใช้อื่นใน `SEED_USERS`, `company_info` จาก `SEED_STORE_INFO`, menu access ค่าเริ่ม, platform `platform` / `platform` — รหัสผ่านเป็น BCrypt
-- test: migrate บน DB ว่าง (ทั้งผ่านแอปและ `scripts/db-apply.sh`); RLS — ตั้ง tenant 1 ไม่เห็นแถวของ tenant 2 / ไม่ตั้ง = 0 แถว / INSERT ด้วย tenant อื่นถูกปฏิเสธ; `an22_app` UPDATE / DELETE `audit_log` ไม่ได้; `an22_app` ไม่มี BYPASSRLS และไม่ใช่ owner; unique รวม tenant (username ซ้ำได้ข้ามบริษัท)
+- test: migrate บน DB ว่าง (ทั้งผ่านแอปและ `scripts/db-apply.sh`); RLS — ตั้ง tenant 1 ไม่เห็นแถวของ tenant 2 / ไม่ตั้ง = 0 แถว / INSERT ด้วย tenant อื่นถูกปฏิเสธ; `an22_app` UPDATE / DELETE `audit_log` ไม่ได้; `an22_app` ไม่มี BYPASSRLS และไม่ใช่ owner; unique รวม tenant (username ซ้ำได้ข้ามบริษัท); FK รวม tenant — `user_branches` อ้างสาขาของบริษัทอื่นไม่ได้; trigger ตั้ง `created_*` / `updated_*` ถูก (insert / update คนละผู้ใช้, แก้ `created_*` ทับไม่ได้)
 
 ### ขั้น 2 — auth / tenant / branch (แกนของทุก request)
 - กฎ: `UserRules` (`canWorkIn`, `hasAdminRights`, `isCompanyAdmin`, …), `CompanyRules.normalizeCompanyCode`, `CostVisibility.canSeeCost`, `SubscriptionRules` (`subscriptionStatus`, `billingNotice`, ข้อความระงับ)
@@ -155,13 +187,14 @@ scripts/db-apply.sh              รันด้วยมือ: `roles.sql` (�
 - path fixtures: `../FrontEnd-An22/docs/backend/fixtures` (ตั้งทับได้ด้วย system property `fixtures.dir` สำหรับ CI)
 
 ### ขั้น 8 — กะ + ล็อก POS + บิลพัก (E48)
-- migration: `shifts` (+ `locked_at`, partial unique กะเปิด 1 กะต่อเครื่อง), `shift_counts`, `cash_movements`, `drawer_opens`, `shift_adjustments`, `held_bills` (`payload jsonb`)
+- migration: `shifts` (+ `locked_at`, partial unique กะเปิด 1 กะต่อเครื่อง), `shift_counts`, `cash_movements`, `drawer_opens`, `shift_adjustments`, `held_bills` (`payload_enc bytea` — เข้ารหัส)
 - กฎ: `ShiftRules` ทั้งหมด (`shiftBlocker`, `openShiftError`, `countCheck`, `closeShiftError`, `shiftSummary`, `varianceReport`, …), `PosTerminalRules.terminalError`
 - endpoint: `/shifts/*` ทั้งหมด รวม `lock` / `unlock` (คนเปิดกะหรือ admin, ข้อความตาม contract), `/pos/held-bills`; เติม `requireShiftChangeError` ให้ `PUT /settings/store|company`, ปิดสาขา / เครื่องที่มีกะเปิด
 - audit `shift_close_other`, `shift_approve`, `shift_adjust`; test blind count (user ไม่เห็นยอด), P6 (user เห็นเฉพาะกะตัวเอง)
 
 ### ขั้น 9 — ขาย + ใบกำกับภาษี
-- migration: `sales`, `sale_lines`, `sale_payments`, `tax_invoices`
+- **ก่อนเริ่ม**: แก้ spec ใน `../FrontEnd-An22` เรื่องห้ามเลขบัตรเต็มใน `reference` (หัวข้อ "ข้อมูลส่วนบุคคล") — ถามข้อความ error กับผู้ใช้ก่อน
+- migration: `sales`, `sale_lines`, `sale_payments`, `tax_invoices` (`buyer_enc` + `buyer_tax_id_hash`)
 - `POST /sales` ตามลำดับตรวจ 1–8 ใน `api-contract.md` → ตัดสต็อกพร้อม COGS (`issueStock`), เลข `POS-<สาขา>-<เครื่อง>-YYYYMMDD-NNNN`, snapshot; ขายระหว่างกะถูกล็อก → 400
 - `POST /sales/cost-check` (E45), `GET /sales` (+ `?branchId=` ตาม `branchScopeError`), `GET /sales/:id`, `void` (approval ของ admin), `PUT /sales/:id/status`
 - ใบกำกับ: `POST /sales/:id/tax-invoice`, `reissue`, `GET …/tax-invoice(s)`, `GET /tax-invoices`, `GET /tax-invoices/buyer` — กฎ `TaxInvoiceRules`, `SaleRules`
@@ -169,7 +202,7 @@ scripts/db-apply.sh              รันด้วยมือ: `roles.sql` (�
 - test: ลำดับข้อความ error ตรง mock, ขายพร้อมกัน 2 thread เลขไม่ซ้ำ, COGS + movement, ทุนเป็น null สำหรับ user
 
 ### ขั้น 10 — ใบลดหนี้ + ใบเปลี่ยน
-- migration: `credit_notes` (+ lines / deductions / refunds), `exchanges` (+ lines); กฎ `CreditNoteRules` (`draftCreditNote`, …), `ExchangeRules`
+- migration: `credit_notes` (`buyer_enc` เหมือนใบกำกับ; + lines / deductions / refunds), `exchanges` (+ lines); กฎ `CreditNoteRules` (`draftCreditNote`, …), `ExchangeRules`
 - endpoint: `/sales/:id/credit-notes`, `/credit-notes`, `/sales/:id/exchanges`; field derived ของ `Sale` (`returnStatus`, `creditedTotal`, `creditNoteNos`, `exchangeNos`); audit `credit_note`
 - **ถามผู้ใช้**: ควรขอให้หน้าบ้านเพิ่ม `credit-note.json` ใน fixtures ก่อน (README ของ fixtures แนะนำไว้) หรือไม่
 
@@ -177,7 +210,7 @@ scripts/db-apply.sh              รันด้วยมือ: `roles.sql` (�
 - `GET /audit-log` (`AuditRules.filterAuditEvents`, `parseAuditQuery`), `GET /company/onboarding`, `GET /company/subscription`, `PUT /company/plan`
 - billing: job รายวัน (`@Scheduled`) ออกใบแจ้งหนี้ `SUB-YYYYMM-NNNN` + ระงับเมื่อพ้นผ่อนผัน — และตรวจตอน login / `me` ด้วย (contract ให้มีผลทุก request); `actorKind: 'system'`
 - `POST /auth/signup` (ใช้ role platform สร้างบริษัท; audit `signup`), `POST /auth/forgot-password` (ตอบข้อความเดียวเสมอ, token เก็บ hash, ลิงก์จาก `APP_BASE_URL` ไม่ใช่ `Host`), `POST /auth/reset-password` (audit `password_reset`)
-- `GET /company/export` (ไม่มีรหัสผ่าน / token), `GET|POST|DELETE /company/deletion`; ระหว่างรอลบ: เฉพาะ owner, endpoint อื่น → 403
+- `GET /company/export` (ไม่มีรหัสผ่าน / token; ข้อมูลผู้ซื้อถอดรหัสแล้ว), `GET|POST|DELETE /company/deletion`; ระหว่างรอลบ: เฉพาะ owner, endpoint อื่น → 403
 - test: billing ตาม `subscription.model.spec.ts` ด้วย `Clock` ปลอม, ลิงก์ไม่ใช้ header `Host`
 
 ### ขั้น 12 — platform admin
@@ -199,7 +232,8 @@ scripts/db-apply.sh              รันด้วยมือ: `roles.sql` (�
 2. ขั้น 5: ทุนเฉลี่ย `numeric(14,2)` หรือ `(14,4)`
 3. ขั้น 10: เพิ่ม fixtures `credit-note.json` ฝั่งหน้าบ้านก่อนหรือไม่
 4. ขั้น 12: `GET /platform/outbox` ไม่มีใน api จริง — หน้า platform ต้องซ่อนเมนูนี้เมื่อไม่ใช่ mock หรือไม่
-5. ระยะเก็บเอกสารภาษีก่อน purge (E39) — ยังรอนักบัญชี: purge ตามเดิมไปก่อน
+5. ขั้น 9: ข้อความ error เมื่อ `reference` เป็นเลขบัตรเต็ม (แก้ spec หน้าบ้านก่อน)
+6. ระยะเก็บเอกสารภาษีก่อน purge (E39) — ยังรอนักบัญชี: purge ตามเดิมไปก่อน
 
 ## วิธีตรวจ (ทุกขั้น)
 
