@@ -17,17 +17,18 @@
 | build | Maven + `mvnw` (wrapper อยู่ใน repo) |
 | DB access | Spring JDBC (`JdbcClient`) — SQL ตรง, ไม่มี JPA / Hibernate (จึงไม่มี `ddl-auto` เลย) |
 | DB | PostgreSQL 18 — dev: `compose.yaml`, test: Testcontainers (image เดียวกัน) |
-| migration | Flyway (`src/main/resources/db/migration/V<n>__<desc>.sql`, ไม่แก้ไฟล์ที่ apply แล้ว) |
+| migration | Flyway — SQL อยู่ที่ `db/` (root ของ repo) เป็น SQL ล้วน รันได้ทั้งจากแอปและด้วยมือ (หัวข้อ "script DB") |
 | JWT | Spring Security + `oauth2-resource-server` (Nimbus) HS256, secret จาก env |
 | เงินในกฎที่ port | `double` + `round2` แบบ JS (`Math.floor(x * 100 + 0.5) / 100`) ให้ตรง fixtures; แปลงเป็น `BigDecimal` scale 2 ตอนเก็บ `numeric(14,2)` |
-| seed dev | ตาม `seedDb()` ของ mock ทั้งหมด (+ ผลของ migration ใน mock เช่นสต็อกยกมา) — แยก location `db/seed` เปิดเฉพาะ profile dev / test |
+| seed dev | ตาม `seedDb()` ของ mock ทั้งหมด (+ ผลของ migration ใน mock เช่นสต็อกยกมา) — `db/seed` เปิดเฉพาะ dev / test (ไม่ลง production) |
 | อีเมล | เลื่อนไปทีหลัง — interface `Mailer` + ตัวที่ log ว่า "ส่งแล้ว" (ไม่ log ลิงก์ / token / อีเมลเต็ม) |
 | test | JUnit 5 + AssertJ + Spring Boot Test (MockMvc) + Testcontainers |
 
 ## โครง repo / package (`com.an22.api`)
 
 ```
-pom.xml, mvnw, .mvn/          compose.yaml (postgres:18 + สคริปต์สร้าง role)   .env.example   CLAUDE.md   docs/plan-step.md
+pom.xml, mvnw, .mvn/          compose.yaml (postgres:18 + `db/roles.sql`)   .env.example   CLAUDE.md   docs/plan-step.md
+db/                           script DB ทั้งหมด (หัวข้อ "script DB")   scripts/db-apply.sh
 src/main/java/com/an22/api/
   Application.java
   config/       ค่าจาก env (ApiProperties), Clock (Asia/Bangkok), Jackson (null ไม่ละ, ISO-8601)
@@ -40,12 +41,32 @@ src/main/java/com/an22/api/
                 SubscriptionRules, SignupRules, PlatformRules, CompanyDataRules, Money (round2, formatBaht `฿1,234.5`)
   auth/ company/ branch/ user/ masterdata/ product/ stock/ transfer/ sale/ shift/ pos/ audit/ billing/ platform/   ← แต่ละ feature: Controller + Service + Repository (JdbcClient)
 src/main/resources/
-  application.yml (context-path `/api`, port 8080)   db/migration/   db/seed/
+  application.yml (context-path `/api`, port 8080) — Flyway อ่าน `filesystem:db/migration` (+ `db/seed` ใน dev / test); Docker image copy `db/` เข้าไป
 src/test/java/com/an22/api/
   rules/        unit test ของกฎ + FixturesTest (อ่าน `../FrontEnd-An22/docs/backend/fixtures/*.json`)
   support/      PostgresContainer (singleton), ApiTest (MockMvc + login helper ร้าน / platform), TenantB (บริษัทที่ 2 สำหรับ test ข้าม tenant)
   <feature>/    integration test ต่อ endpoint
 ```
+
+## script DB (ตกลงแล้ว 2026-10-20)
+
+script ทั้งหมดอยู่ที่ `db/` ที่ root ของ repo — **ไฟล์เดียวกัน** ใช้ได้ทั้งแอป (Flyway ตอน start) และคนรันเองบน DB:
+
+```
+db/
+  README.md                      ลำดับรัน + คำสั่ง (ติดตั้ง DB ใหม่ / อัปเกรด / dev)
+  roles.sql                      สร้าง role an22_owner / an22_app / an22_platform + database — รันครั้งเดียวด้วย superuser
+                                 รหัสผ่านส่งเป็นตัวแปร psql (`psql -v app_password=… -f db/roles.sql`) ไม่มีรหัสในไฟล์
+  migration/V1__base.sql …       schema ทีละ version (ตาราง, index, RLS, grant) — SQL ล้วน ไม่ใช้ placeholder ของ Flyway, ไม่แก้ไฟล์ที่ใช้แล้ว
+  seed/V1_1__seed_demo.sql …     ข้อมูลตัวอย่าง DEMO (dev / test เท่านั้น) — เลข version แทรกหลัง migration ที่มันต้องใช้
+scripts/db-apply.sh              รันด้วยมือ: `roles.sql` (ถ้าสั่ง `--roles`) → Flyway CLI (Docker image `flyway/flyway`) migrate `db/migration` (+ `db/seed` เมื่อ `--seed`)
+                                 ต่อ DB จาก env (`DB_URL`, `DB_OWNER_USER`, `DB_OWNER_PASSWORD`) — บันทึกลง `flyway_schema_history` เหมือนแอปรัน จึงไม่ซ้ำ / ไม่ข้ามไฟล์
+```
+
+- **ทางที่ 1 (ค่าเริ่ม)**: แอปรัน Flyway เองตอน start ด้วย role `an22_owner`
+- **ทางที่ 2 (คนรันเอง / DBA)**: `scripts/db-apply.sh` แล้วตั้ง `FLYWAY_MIGRATE=false` ให้แอป — แอปแค่ `validate` (version ใน DB ไม่ตรงกับไฟล์ → ไม่ start) และไม่ต้องรู้รหัสของ `an22_owner`
+- ไม่มี Docker / Flyway CLI: `psql -f` ทีละไฟล์ตามเลข version ได้บน **DB ว่าง** (ไฟล์เป็น SQL ล้วน) แต่ครั้งต่อไปต้องใช้ทางที่ 1 / 2 หลัง `flyway baseline` — เขียนวิธีไว้ใน `db/README.md`
+- dev: `compose.yaml` ใส่ `docker/initdb.sh` ใน `docker-entrypoint-initdb.d` ซึ่งเรียก `psql -v … -f db/roles.sql` (รหัสจาก `.env`); test: Testcontainers รัน `roles.sql` แล้ว migrate + seed
 
 ## กติกาที่ใช้ทุกขั้น
 
@@ -55,7 +76,7 @@ src/test/java/com/an22/api/
 - FK รวม `(tenant_id, id)` กันอ้างข้ามบริษัท; index / unique ขึ้นต้นด้วย `tenant_id`; ชื่อ snake_case
 - เงิน `numeric(14,2)`, เวลา `timestamptz`, วันที่ธุรกิจ `date`, enum = `text` + `CHECK`; ห้ามลบเอกสาร (มีแต่เปลี่ยนสถานะ)
 - ตาราง platform (`companies`, `billing_invoices`, `platform_admins`, `password_reset_tokens`, ตารางนับ login ผิด) ไม่อยู่ใต้ RLS
-- DB role 3 ตัว (สร้างใน migration แรก, รหัสผ่านตั้งจาก env / สคริปต์ init ของ compose — ไม่อยู่ใน repo):
+- DB role 3 ตัว (สร้างด้วย `db/roles.sql` — ต้องใช้ superuser จึงไม่อยู่ใน migration; รหัสผ่านจาก env / ตัวแปร psql — ไม่อยู่ใน repo; migration ทำ grant):
   - `an22_owner` — เจ้าของตาราง, Flyway ใช้ตัวนี้เท่านั้น
   - `an22_app` — แอปฝั่งร้าน: ไม่ใช่ owner, ไม่มี `BYPASSRLS`, `audit_log` ได้แค่ `INSERT` + `SELECT`, อ่าน `companies` ได้ (ตรวจบริษัทยังใช้งาน)
   - `an22_platform` — งาน platform + ก่อน login (login / signup / ลืมรหัสผ่าน หาบริษัทจากรหัส): `BYPASSRLS`
@@ -81,7 +102,9 @@ src/test/java/com/an22/api/
 
 ### ขั้น 0 — โครงโปรเจกต์
 - `mvnw` + `pom.xml` (Boot 4: web, security, oauth2-resource-server, jdbc, flyway + flyway-database-postgresql, postgresql, validation; test: testcontainers-postgresql)
-- `compose.yaml`: `postgres:18` + `docker/initdb/` สร้าง database + role 3 ตัว (รหัสจาก `.env`); `.env.example` (ไม่มีค่าจริง), `.gitignore`
+- `db/README.md`, `db/roles.sql`, `scripts/db-apply.sh` (ทดสอบ: DB ว่าง → `--roles --seed` ผ่าน, รันซ้ำไม่ทำอะไร)
+- `compose.yaml`: `postgres:18` + `docker/initdb.sh` → `db/roles.sql` สร้าง database + role 3 ตัว (รหัสจาก `.env`); `.env.example` (ไม่มีค่าจริง), `.gitignore`
+- config `FLYWAY_MIGRATE` (`true` = migrate ตอน start, `false` = validate อย่างเดียว)
 - `application.yml`: context path `/api`, port 8080, Jackson ไม่ละ null + ISO-8601, `TZ` ของกฎ = Asia/Bangkok, health `GET /api/healthz`
 - `ApiException` + `ErrorHandler` (`{ message }`, 404 ทั่วไป, 400 JSON อ่านไม่ได้, 500 ไม่เปิดเผยรายละเอียด)
 - test support: Postgres container singleton + Flyway migrate (รวม seed) + MockMvc
@@ -89,9 +112,9 @@ src/test/java/com/an22/api/
 - test: context ขึ้นได้, `/api/healthz`, error format
 
 ### ขั้น 1 — schema ฐาน + RLS + seed บริษัท / ผู้ใช้
-- migration: role + grant, ตาราง platform (`companies`, `platform_admins`, `billing_invoices`, `password_reset_tokens`), `company_info`, `branches`, `users` (+ `user_branches`, partial unique owner), `menu_access`, `audit_log` (insert-only), `doc_counters`
-- seed (`db/seed`): DEMO, HQ (`00000`) + BN, `admin` / `admin` (owner ตาม `fillOwner()`), `somchai` / `1234`, ผู้ใช้อื่นใน `SEED_USERS`, `company_info` จาก `SEED_STORE_INFO`, menu access ค่าเริ่ม, platform `platform` / `platform` — รหัสผ่านเป็น BCrypt
-- test: migrate บน DB ว่าง; RLS — ตั้ง tenant 1 ไม่เห็นแถวของ tenant 2 / ไม่ตั้ง = 0 แถว / INSERT ด้วย tenant อื่นถูกปฏิเสธ; `an22_app` UPDATE / DELETE `audit_log` ไม่ได้; `an22_app` ไม่มี BYPASSRLS และไม่ใช่ owner; unique รวม tenant (username ซ้ำได้ข้ามบริษัท)
+- migration `db/migration/V1__base.sql`: grant ให้ role, ตาราง platform (`companies`, `platform_admins`, `billing_invoices`, `password_reset_tokens`), `company_info`, `branches`, `users` (+ `user_branches`, partial unique owner), `menu_access`, `audit_log` (insert-only), `doc_counters`
+- seed (`db/seed/V1_1__seed_demo.sql`): DEMO, HQ (`00000`) + BN, `admin` / `admin` (owner ตาม `fillOwner()`), `somchai` / `1234`, ผู้ใช้อื่นใน `SEED_USERS`, `company_info` จาก `SEED_STORE_INFO`, menu access ค่าเริ่ม, platform `platform` / `platform` — รหัสผ่านเป็น BCrypt
+- test: migrate บน DB ว่าง (ทั้งผ่านแอปและ `scripts/db-apply.sh`); RLS — ตั้ง tenant 1 ไม่เห็นแถวของ tenant 2 / ไม่ตั้ง = 0 แถว / INSERT ด้วย tenant อื่นถูกปฏิเสธ; `an22_app` UPDATE / DELETE `audit_log` ไม่ได้; `an22_app` ไม่มี BYPASSRLS และไม่ใช่ owner; unique รวม tenant (username ซ้ำได้ข้ามบริษัท)
 
 ### ขั้น 2 — auth / tenant / branch (แกนของทุก request)
 - กฎ: `UserRules` (`canWorkIn`, `hasAdminRights`, `isCompanyAdmin`, …), `CompanyRules.normalizeCompanyCode`, `CostVisibility.canSeeCost`, `SubscriptionRules` (`subscriptionStatus`, `billingNotice`, ข้อความระงับ)
@@ -182,6 +205,7 @@ src/test/java/com/an22/api/
 
 ```sh
 ./mvnw verify                          # unit + integration (Testcontainers เปิด postgres:18 ว่างเอง)
+scripts/db-apply.sh --roles --seed      # รัน script DB ด้วยมือ (ทางที่ 2) บน DB ตาม env
 docker compose up -d db && ./mvnw spring-boot:run -Dspring-boot.run.profiles=dev   # dev DB + seed
 docker compose down -v                 # รีเซ็ต DB local
 curl -s localhost:8080/api/healthz
