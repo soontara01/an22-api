@@ -164,7 +164,7 @@ api รันได้หลาย instance หลัง load balancer โดย
 - **ไฟล์**: ไม่เขียนไฟล์ลง disk ของ instance — export บริษัทตอบเป็น stream ตรง; ถ้าทำเป็น job + ลิงก์ดาวน์โหลดภายหลัง ไฟล์ต้องอยู่ที่ storage กลาง (DB / object storage)
 - **connection**: แอปต่อผ่าน PgBouncer เสมอ (หัวข้อ "PgBouncer") — pool ของ instance (Hikari `DB_POOL_SIZE`) ต่อ PgBouncer, PgBouncer คุมจำนวน connection จริงเข้า PostgreSQL (`default_pool_size` × user ≤ `max_connections`)
 - **ปิดเครื่องนุ่มนวล**: `server.shutdown=graceful` (รอ request ที่ค้างให้จบ) + health แยก `GET /api/healthz` (liveness, ไม่แตะ DB) / `GET /api/readyz` (readiness, ping DB) ให้ load balancer
-- **log** เป็น JSON ไป stdout (ไม่เขียนไฟล์), มี request id (รับ `X-Request-Id` จาก web ถ้ารูปแบบถูก ไม่งั้นสุ่ม) ไว้ตามข้าม instance
+- **log** เป็น JSON ไป stdout (ไม่เขียนไฟล์), มี request id (รับ `X-Request-Id` จาก web ถ้ารูปแบบถูก ไม่งั้นสุ่ม) ไว้ตามข้าม instance — รายละเอียดหัวข้อ "Log ต่อ request"
 - **เวลา**: instance ใช้ UTC, วันธุรกิจคิดด้วย `Clock` Asia/Bangkok ในโค้ด (ไม่พึ่ง timezone ของเครื่อง)
 
 ### PgBouncer (บังคับ — ตกลงแล้ว 2026-10-21)
@@ -178,6 +178,23 @@ api รันได้หลาย instance หลัง load balancer โดย
   - ทุก query อยู่ใน transaction อยู่แล้ว (TxGuard) — query เดี่ยวนอก transaction ใน PgBouncer จะได้ connection ที่ไม่มี tenant
 - image PgBouncer + เวอร์ชันระบุแน่นอน เลือกตอนขั้น 0 (บอกผู้ใช้ก่อน)
 - test ต้องวิ่งผ่าน PgBouncer จริง (จับ bug ที่เกิดเฉพาะ transaction pooling): RLS / tenant ไม่ค้างข้าม transaction เมื่อ PgBouncer สลับ connection, prepared statement ซ้ำหลายรอบผ่าน, advisory lock ของ job
+
+### Log ต่อ request (ตกลงแล้ว 2026-10-21)
+`web/RequestLogFilter` (filter แรกสุด) เขียน **1 บรรทัด JSON ต่อ request** หลังตอบเสร็จ:
+```json
+{"type":"access","requestId":"a1b2…","method":"POST","path":"/api/sales","query":"from=2026-10-01",
+ "status":201,"durationMs":184,"tenantId":1,"userId":2,"branchId":1,"terminalId":1,"ip":"203.0.113.7",
+ "requestBody":{…},"responseBody":{…}}
+```
+- `durationMs` = เวลาตั้งแต่ request เข้า filter จนตอบเสร็จ (รวม DB + serialize); 5xx = ระดับ error, 4xx = warn, อื่น = info; `/api/healthz`, `/api/readyz` = debug
+- **body ตาม env `LOG_BODY`** = `off` | `error` (**ค่าเริ่ม** — ใส่ body เฉพาะ 4xx / 5xx) | `all` (dev / ไล่ปัญหาชั่วคราว)
+  - อ่านด้วย `ContentCachingRequestWrapper` / `ContentCachingResponseWrapper`; เฉพาะ `application/json`; ตัดที่ `LOG_BODY_MAX` (ค่าเริ่ม 4 KB) + `"truncated": true`
+- **mask ก่อน log เสมอ** (ทุกระดับความลึกของ JSON, เทียบชื่อ key ไม่สนตัวพิมพ์) → `"***"`:
+  `password`, `token`, `approval`, `buyer` (ทั้งก้อน — PII), `taxId`, `address`, `email`, `reference` (อาจเป็นเลขบัตร)
+- **ไม่ log body เลย** (แม้ `all`): `/api/auth/**`, `/api/platform/auth/**`, `/api/shifts/*/unlock`, `/api/company/export`, `/api/pos/held-bills` (บิลพักมีข้อมูลผู้ซื้อ)
+- query: ค่าของ `token` / `code` / `password` / `taxId` → `***` (แบบเดียวกับ an22-web)
+- ไม่ log header (มี `Authorization`); ทุนที่ซ่อนจาก user ไม่เกี่ยว (log ไม่ถึงผู้ใช้) แต่ response ที่ log = ค่าหลังซ่อนแล้ว
+- test: บรรทัด access มีครบทุก field + `durationMs`, `LOG_BODY=error` ไม่มี body ตอน 2xx / มีตอน 400, mask ทุกชื่อในรายการ (ซ้อนลึก), path ที่ห้ามไม่มี body แม้ `all`, ตัดความยาว
 
 ### Request
 - JWT: claims `sub`, `tenantId`, `role`, `branchIds` / `allBranches`; ร้าน vs platform แยกด้วย `aud` (`shop` / `platform`) — ใช้สลับกัน → 401; อายุ `JWT_TTL_DAYS` (ค่าเริ่ม 7)
@@ -203,7 +220,7 @@ api รันได้หลาย instance หลัง load balancer โดย
 - config `FLYWAY_MIGRATE` (`true` = migrate ตอน start, `false` = validate อย่างเดียว)
 - `PiiCipher` (เข้ารหัส / ถอด / HMAC, หลาย version) + test: ถอดกลับได้, ค่าเดิม 2 ครั้งได้ byte ต่างกัน, แก้ byte เดียว → ถอดไม่ได้, AAD คนละ tenant → ถอดไม่ได้,
   กุญแจเก่ายังอ่านได้หลังเพิ่ม version ใหม่, hash ของ `1-2345-67890-12-3` = `1234567890123` และต่างกันเมื่อ tenant ต่าง, ไม่ตั้ง env → ไม่ start (ข้อความไม่มีค่ากุญแจ)
-- `application.yml`: context path `/api`, port 8080, Jackson ไม่ละ null + ISO-8601, `TZ` ของกฎ = Asia/Bangkok, health `GET /api/healthz` (liveness) + `GET /api/readyz` (ping DB), `server.shutdown=graceful`, log JSON → stdout + request id
+- `application.yml`: context path `/api`, port 8080, Jackson ไม่ละ null + ISO-8601, `TZ` ของกฎ = Asia/Bangkok, health `GET /api/healthz` (liveness) + `GET /api/readyz` (ping DB), `server.shutdown=graceful`, log JSON → stdout + request id, `RequestLogFilter` (หัวข้อ "Log ต่อ request")
 - `ApiException` + `ErrorHandler` (`{ message }`, 404 ทั่วไป, 400 JSON อ่านไม่ได้, 500 ไม่เปิดเผยรายละเอียด)
 - test support: Postgres + PgBouncer container (network เดียวกัน, singleton) — Flyway migrate (รวม seed) ตรงเข้า postgres, DataSource ของแอปผ่าน pgbouncer + MockMvc
 - `DB_URL` (ผ่าน pgbouncer) / `DB_MIGRATE_URL` (ตรง) แยกกัน
