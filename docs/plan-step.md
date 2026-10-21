@@ -15,7 +15,7 @@
 | --- | --- |
 | ภาษา / framework | Java 25 (Temurin ที่มีในเครื่อง) + Spring Boot 4.x รุ่นล่าสุด (Spring Framework 7, Jackson 3) |
 | build | Maven + `mvnw` (wrapper อยู่ใน repo) |
-| DB access | Spring JDBC (`JdbcClient`) — SQL ตรง, ไม่มี JPA / Hibernate (จึงไม่มี `ddl-auto` เลย) |
+| DB access | Spring JDBC (`JdbcClient`) — SQL ตรง, ไม่มี JPA / Hibernate (จึงไม่มี `ddl-auto` เลย); transaction ด้วย `@Transactional` ที่ service (หัวข้อ "Transaction") |
 | DB | PostgreSQL 18 — dev: `compose.yaml`, test: Testcontainers (image เดียวกัน) |
 | migration | Flyway — SQL อยู่ที่ `db/` (root ของ repo) เป็น SQL ล้วน รันได้ทั้งจากแอปและด้วยมือ (หัวข้อ "script DB") |
 | JWT | Spring Security + `oauth2-resource-server` (Nimbus) HS256, secret จาก env |
@@ -34,13 +34,14 @@ src/main/java/com/an22/api/
   Application.java
   config/       ค่าจาก env (ApiProperties), Clock (Asia/Bangkok), Jackson (null ไม่ละ, ISO-8601)
   security/     JwtService (ออก / ตรวจ), SecurityConfig (chain ร้าน / platform), CurrentUser, ClientIp (X-Real-IP)
-  db/           TenantTx — เปิด transaction + `set_config('app.tenant_id' / 'app.user_id' / 'app.actor_kind', ?, true)` (= SET LOCAL), DocNumbers (ตัวนับเลขเอกสาร)
+  db/           TenantTransactionManager — ตั้ง `set_config('app.tenant_id' / 'app.user_id' / 'app.actor_kind', ?, true)` (= SET LOCAL) ทุกครั้งที่เริ่ม transaction,
+                TxGuard (query นอก transaction → error), DocNumbers (ตัวนับเลขเอกสาร)
   web/          ApiException(status, message), ErrorHandler → `{ message }`, BranchContext (X-Branch-Id), TerminalContext (X-Terminal-Id), CostHidingAdvice (hideCost จุดเดียว)
   rules/        **port จาก core/models — pure Java ไม่ผูก Spring** 1 class ต่อ 1 ไฟล์ TS: PosPricing, PosPayment, PaymentMethodRules, PromotionRules, PriceRules,
                 Costing, SerialRules, ProductRules, CategoryRules, Suppliers, TransferRules, SaleRules, CreditNoteRules, ExchangeRules, TaxInvoiceRules,
                 ShiftRules, PosTerminalRules, StoreInfoRules, MenuAccessRules, UserRules, CostVisibility, CompanyRules, AuditRules, PlanRules,
                 SubscriptionRules, SignupRules, PlatformRules, CompanyDataRules, Money (round2, formatBaht `฿1,234.5`)
-  auth/ company/ branch/ user/ masterdata/ product/ stock/ transfer/ sale/ shift/ pos/ audit/ billing/ platform/   ← แต่ละ feature: Controller + Service + Repository (JdbcClient)
+  auth/ company/ branch/ user/ masterdata/ product/ stock/ transfer/ sale/ shift/ pos/ audit/ billing/ platform/   ← แต่ละ feature 3 ชั้น: `XxxController` → `XxxService` → `XxxDao` (JdbcClient) — หัวข้อ "3 ชั้น"
 src/main/resources/
   application.yml (context-path `/api`, port 8080) — Flyway อ่าน `filesystem:db/migration` (+ `db/seed` ใน dev / test); Docker image copy `db/` เข้าไป
 src/test/java/com/an22/api/
@@ -114,6 +115,31 @@ scripts/db-apply.sh              รันด้วยมือ: `roles.sql` (�
   — **เปลี่ยน spec**: แก้ใน `../FrontEnd-An22` ก่อนขั้น 9 (กฎใน `core/models` + mock + spec + `api-contract.md` / `domain-rules.md` + ช่องกรอกที่ POS ตรวจเหมือนกัน, commit เดียว) ข้อความ error ยืนยันกับผู้ใช้ตอนนั้น
 - ค่าที่ถอดรหัสแล้วไม่ลง log / ข้อความ error; export บริษัท (owner) ถอดรหัสให้
 
+### 3 ชั้น: controller → service → dao (ตกลงแล้ว 2026-10-21)
+
+| ชั้น | ทำ | ห้าม |
+| --- | --- | --- |
+| **controller** | รับ HTTP, อ่าน header / path / body, ตรวจ role, เรียก service **1 method ต่อ request**, คืน DTO | SQL, `@Transactional`, กฎธุรกิจ |
+| **service** | `@Transactional` (1 method = 1 use case = 1 transaction), เรียงลำดับตรวจกฎ (`rules/`), เรียก dao, audit, เลขเอกสาร | SQL ตรง, ของ HTTP (`HttpServletRequest`) |
+| **dao** | SQL ผ่าน `JdbcClient`, map แถว ↔ object | กฎธุรกิจ, `@Transactional` (ใช้ transaction ของ service) |
+
+- controller เรียก service → เปิด transaction, service return → commit, throw → rollback
+- **controller เรียก service แค่ 1 method** — เรียก 2 method = 2 transaction (ตัวแรก commit ไปแล้ว ตัวหลังล้มย้อนไม่ได้); งานที่ต้องสำเร็จ / ล้มพร้อมกันอยู่ใน service method เดียว
+- service เรียก service อื่น = ร่วม transaction เดิม (`REQUIRED`); เปิดใหม่เฉพาะที่ตั้งใจ (`REQUIRES_NEW` — `login_failed`)
+- ห้ามเรียก `@Transactional` method ใน class เดียวกันเอง (ไม่ผ่าน proxy); `ApiException` เป็น `RuntimeException` (rollback อัตโนมัติ)
+- `rules/` (pure) ถูกเรียกจาก service เท่านั้น
+
+### Transaction (ตกลงแล้ว 2026-10-21)
+- ใช้ `@Transactional` ของ Spring ตามปกติที่ชั้น service (1 request = 1 transaction) — `JdbcClient` ใช้ connection ของ transaction ปัจจุบันเอง
+- 2 DataSource = 2 transaction manager: `appTx` (`an22_app`, ค่าเริ่ม `@Primary`) และ `platformTx` (`an22_platform` — ใช้ `@Transactional("platformTx")`)
+- `TenantTransactionManager` (subclass `DataSourceTransactionManager`, override `prepareTransactionalConnection`) ตั้ง `app.tenant_id` / `app.user_id` / `app.actor_kind`
+  จาก `CurrentUser` ของ request ทันทีที่เปิด transaction → service ไม่ต้องจำตั้งเอง; ค่าเป็น SET LOCAL หายเมื่อจบ transaction (connection pool ปลอดภัย)
+- **TxGuard**: DataSource ของแอปห่อให้ query นอก transaction → error ทันที (กันลืม `@Transactional` — ถึงหลุดไป RLS ก็ให้ 0 แถว แต่จะกลายเป็นบั๊กเงียบ)
+- GET ใช้ `@Transactional(readOnly = true)` + `enforceReadOnly` → PostgreSQL `READ ONLY` — ชั้นที่สองของกฎ "GET ห้ามแก้ข้อมูล" (E49)
+- งานที่ต้องบันทึกแม้ request ล้ม (audit `login_failed`, นับ login ผิด) ใช้ `REQUIRES_NEW`
+- เลขเอกสาร (`doc_counters`) อยู่ใน transaction เดียวกับเอกสาร — rollback แล้วเลขไม่หาย / ไม่ข้าม
+- test: transaction ซ้อนไม่รั่ว tenant ข้าม request (connection เดิมจาก pool ไม่มีค่า tenant ค้าง), query นอก transaction → error, GET เขียนไม่ได้
+
 ### Request
 - JWT: claims `sub`, `tenantId`, `role`, `branchIds` / `allBranches`; ร้าน vs platform แยกด้วย `aud` (`shop` / `platform`) — ใช้สลับกัน → 401; อายุ `JWT_TTL_DAYS` (ค่าเริ่ม 7)
 - ทุก request ของร้าน: อ่านผู้ใช้ + บริษัทจาก DB (สิทธิ์สาขามีผลทันที) — บริษัทไม่ active / ผู้ใช้ปิด / ลบแล้ว → 401
@@ -150,7 +176,7 @@ scripts/db-apply.sh              รันด้วยมือ: `roles.sql` (�
 
 ### ขั้น 2 — auth / tenant / branch (แกนของทุก request)
 - กฎ: `UserRules` (`canWorkIn`, `hasAdminRights`, `isCompanyAdmin`, …), `CompanyRules.normalizeCompanyCode`, `CostVisibility.canSeeCost`, `SubscriptionRules` (`subscriptionStatus`, `billingNotice`, ข้อความระงับ)
-- `JwtService`, `SecurityConfig` (chain `/api/platform/**` ↔ ร้าน), `TenantTx`, `BranchContext`, `TerminalContext`, `ClientIp`
+- `JwtService`, `SecurityConfig` (chain `/api/platform/**` ↔ ร้าน), `TenantTransactionManager`, `BranchContext`, `TerminalContext`, `ClientIp`
 - endpoint: `POST /auth/login` (E3 ข้อความเดียว, ระงับ / รอลบ ตามลำดับ mock, audit `login` / `login_failed`), `GET /me`, `POST /auth/verify` (400 เสมอ), `POST /platform/auth/login`, `GET /platform/me`
 - จำกัด login ผิด / `auth/verify` ต่อบัญชี + ต่อ `X-Real-IP` (ตาราง platform นับครั้ง) — **ต้องถามผู้ใช้ก่อนทำ: จำนวนครั้ง / ระยะเวลา / ข้อความ** แล้วเพิ่มใน `api-contract.md`
 - test: login ถูก / ผิดทุกแบบ (ข้อความเดียว), token ร้านใช้กับ `/platform/**` ไม่ได้และกลับกัน, token หมดอายุ / ปลอม → 401, ปิดผู้ใช้แล้ว token เดิม → 401, `X-Branch-Id` ผิด → 403 (ยกเว้น `/me`), ไม่ log รหัสผ่าน
