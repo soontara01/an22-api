@@ -1,0 +1,46 @@
+# DB สำหรับ dev: PostgreSQL + PgBouncer (transaction pooling — จำลอง Azure Flexible Server + PgBouncer ในตัว)
+# ค่าทั้งหมดจาก .env (คัดลอกจาก .env.example) — `docker compose up -d` / รีเซ็ต: `docker compose down -v`
+name: an22-api
+
+services:
+  db:
+    image: postgres:18.6
+    environment:
+      POSTGRES_PASSWORD: ${DB_SUPERUSER_PASSWORD:?ตั้ง DB_SUPERUSER_PASSWORD ใน .env}
+      DB_ADMIN_USER: ${DB_ADMIN_USER:-azure_admin}
+      DB_ADMIN_PASSWORD: ${DB_ADMIN_PASSWORD:?ตั้ง DB_ADMIN_PASSWORD ใน .env}
+      DB_NAME: ${DB_NAME:-an22}
+      DB_OWNER_PASSWORD: ${DB_OWNER_PASSWORD:?ตั้ง DB_OWNER_PASSWORD ใน .env}
+      DB_APP_PASSWORD: ${DB_APP_PASSWORD:?ตั้ง DB_APP_PASSWORD ใน .env}
+      DB_PLATFORM_PASSWORD: ${DB_PLATFORM_PASSWORD:?ตั้ง DB_PLATFORM_PASSWORD ใน .env}
+      TZ: UTC
+    volumes:
+      - ./db:/db:ro
+      - ./docker/initdb.sh:/docker-entrypoint-initdb.d/10-an22.sh:ro
+      - db-data:/var/lib/postgresql
+    ports:
+      - "127.0.0.1:${DB_DIRECT_PORT:-5432}:5432"   # Flyway / db-apply.sh / psql (ตรง)
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U postgres -d ${DB_NAME:-an22}"]  # TCP: ตอน initdb server ฟังแค่ socket
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  pgbouncer:
+    image: edoburu/pgbouncer:v1.25.2-p0
+    entrypoint: ["/bin/sh", "/an22/start.sh"]
+    environment:
+      DB_APP_USER: ${DB_APP_USER:-an22_app}
+      DB_APP_PASSWORD: ${DB_APP_PASSWORD:?ตั้ง DB_APP_PASSWORD ใน .env}
+      DB_PLATFORM_USER: ${DB_PLATFORM_USER:-an22_platform}
+      DB_PLATFORM_PASSWORD: ${DB_PLATFORM_PASSWORD:?ตั้ง DB_PLATFORM_PASSWORD ใน .env}
+    volumes:
+      - ./docker/pgbouncer:/an22:ro
+    ports:
+      - "127.0.0.1:${DB_POOLER_PORT:-6432}:6432"   # แอป (DB_URL)
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  db-data:

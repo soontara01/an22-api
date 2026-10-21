@@ -1,0 +1,11 @@
+# dev: ./mvnw spring-boot:run -Dspring-boot.run.profiles=dev — อ่าน .env ที่ root ของ repo (ไม่ commit)
+spring:
+  config:
+    import: optional:file:.env[.properties]
+
+an22:
+  db:
+    # + ข้อมูลตัวอย่าง DEMO (ไม่ลง production)
+    locations: filesystem:db/migration,filesystem:db/seed
+  log:
+    body: ${LOG_BODY:all}

@@ -1,0 +1,5 @@
+# test: DB จาก TestDatabase (Testcontainers postgres + pgbouncer) ผ่าน @DynamicPropertySource
+an22:
+  db:
+    locations: filesystem:db/migration,filesystem:db/seed
+    pool-size: 5

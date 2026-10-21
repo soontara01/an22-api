@@ -1,6 +1,6 @@
 # แผนทำ an22-api (C2) — ทีละขั้นย่อย
 
-สถานะ: แผนเสนอ 2026-10-20 — รอผู้ใช้อ่าน / แก้ก่อนเริ่มขั้น 0
+สถานะ: ขั้น 0 เสร็จ 2026-10-21 — รอผู้ใช้ก่อนเริ่มขั้น 1
 
 ## บริบท
 
@@ -13,10 +13,10 @@
 
 | เรื่อง | เลือก |
 | --- | --- |
-| ภาษา / framework | Java 25 (Temurin ที่มีในเครื่อง) + Spring Boot 4.x รุ่นล่าสุด (Spring Framework 7, Jackson 3) |
-| build | Maven + `mvnw` (wrapper อยู่ใน repo) |
+| ภาษา / framework | Java 25 (Temurin ที่มีในเครื่อง) + **Spring Boot 4.1.1** (Spring Framework 7.0.9, Jackson 3.1.5, Flyway 12.4.0, Testcontainers 2.0.5, pgJDBC 42.7.13 — ตาม BOM; ตกลง 2026-10-21) |
+| build | Maven 3.9.16 + `mvnw` (wrapper 3.3.4 อยู่ใน repo) |
 | DB access | Spring JDBC (`JdbcClient`) — SQL ตรง, ไม่มี JPA / Hibernate (จึงไม่มี `ddl-auto` เลย); transaction ด้วย `@Transactional` ที่ service (หัวข้อ "Transaction") |
-| DB | PostgreSQL 18 + **PgBouncer (บังคับ, transaction pooling)** — dev: `compose.yaml`, test: Testcontainers (postgres + pgbouncer ชุดเดียวกัน) |
+| DB | PostgreSQL 18 + **PgBouncer (บังคับ, transaction pooling)** — prod: Azure Flexible Server + PgBouncer ในตัว (หัวข้อ "Production: Azure"); dev: `compose.yaml`, test: Testcontainers — `postgres:18.6` + `edoburu/pgbouncer:v1.25.2-p0` (เวอร์ชันเดียวกับ Azure) |
 | migration | Flyway — SQL อยู่ที่ `db/` (root ของ repo) เป็น SQL ล้วน รันได้ทั้งจากแอปและด้วยมือ (หัวข้อ "script DB") |
 | JWT | Spring Security + `oauth2-resource-server` (Nimbus) HS256, secret จาก env |
 | เงินในกฎที่ port | `double` + `round2` แบบ JS (`Math.floor(x * 100 + 0.5) / 100`) ให้ตรง fixtures; แปลงเป็น `BigDecimal` scale 2 ตอนเก็บ `numeric(14,2)` |
@@ -28,15 +28,17 @@
 ## โครง repo / package (`com.an22.api`)
 
 ```
-pom.xml, mvnw, .mvn/          compose.yaml (postgres:18 + `db/roles.sql`)   .env.example   CLAUDE.md   docs/plan-step.md
+pom.xml, mvnw, .mvn/          compose.yaml (postgres + pgbouncer)   .env.example   CLAUDE.md   docs/plan-step.md
 db/                           script DB ทั้งหมด (หัวข้อ "script DB")   scripts/db-apply.sh
+docker/                       initdb.sh (สร้าง admin จำลอง Azure → roles.sql), pgbouncer/ (pgbouncer.ini + start.sh) — ใช้ทั้ง compose และ Testcontainers
 src/main/java/com/an22/api/
   Application.java
-  config/       ค่าจาก env (ApiProperties), Clock (Asia/Bangkok), Jackson (null ไม่ละ, ISO-8601)
-  security/     JwtService (ออก / ตรวจ), SecurityConfig (chain ร้าน / platform), CurrentUser, ClientIp (X-Real-IP)
+  config/       ค่าจาก env (ApiProperties + check()), Clock (Asia/Bangkok), DataSourceConfig (app / platform), FlywayConfig
+  security/     PiiCipher, JwtService (ออก / ตรวจ), SecurityConfig (chain ร้าน / platform), CurrentUser, ClientIp (X-Real-IP)
   db/           TenantTransactionManager — ตั้ง `set_config('app.tenant_id' / 'app.user_id' / 'app.actor_kind', ?, true)` (= SET LOCAL) ทุกครั้งที่เริ่ม transaction,
                 TxGuard (query นอก transaction → error), DocNumbers (ตัวนับเลขเอกสาร)
-  web/          ApiException(status, message), ErrorHandler → `{ message }`, BranchContext (X-Branch-Id), TerminalContext (X-Terminal-Id), CostHidingAdvice (hideCost จุดเดียว)
+  health/       /healthz, /readyz (3 ชั้นเหมือน feature อื่น)
+  web/          ApiException(status, message), ErrorHandler + FallbackErrorController → `{ message }`, RequestLogFilter, BranchContext (X-Branch-Id), TerminalContext (X-Terminal-Id), CostHidingAdvice (hideCost จุดเดียว)
   rules/        **port จาก core/models — pure Java ไม่ผูก Spring** 1 class ต่อ 1 ไฟล์ TS: PosPricing, PosPayment, PaymentMethodRules, PromotionRules, PriceRules,
                 Costing, SerialRules, ProductRules, CategoryRules, Suppliers, TransferRules, SaleRules, CreditNoteRules, ExchangeRules, TaxInvoiceRules,
                 ShiftRules, PosTerminalRules, StoreInfoRules, MenuAccessRules, UserRules, CostVisibility, CompanyRules, AuditRules, PlanRules,
@@ -46,7 +48,8 @@ src/main/resources/
   application.yml (context-path `/api`, port 8080) — Flyway อ่าน `filesystem:db/migration` (+ `db/seed` ใน dev / test); Docker image copy `db/` เข้าไป
 src/test/java/com/an22/api/
   rules/        unit test ของกฎ + FixturesTest (อ่าน `../FrontEnd-An22/docs/backend/fixtures/*.json`)
-  support/      PostgresContainer (singleton), ApiTest (MockMvc + login helper ร้าน / platform), TenantB (บริษัทที่ 2 สำหรับ test ข้าม tenant)
+  support/      TestDatabase (postgres + pgbouncer singleton), ApiTest (MockMvc + login helper ร้าน / platform), ProbeController (endpoint ของ test), TenantB (บริษัทที่ 2 สำหรับ test ข้าม tenant)
+                unit test = `*Test` (surefire), integration = `*IT` (failsafe) — `./mvnw verify` รันทั้งคู่
   <feature>/    integration test ต่อ endpoint
 ```
 
@@ -57,19 +60,23 @@ script ทั้งหมดอยู่ที่ `db/` ที่ root ของ
 ```
 db/
   README.md                      ลำดับรัน + คำสั่ง (ติดตั้ง DB ใหม่ / อัปเกรด / dev)
-  roles.sql                      สร้าง role an22_owner / an22_app / an22_platform + database — รันครั้งเดียวด้วย superuser
+  roles.sql                      สร้าง role an22_owner / an22_app / an22_platform + database — รันครั้งเดียวด้วย admin ที่ไม่ใช่ superuser ก็ได้ (CREATEDB CREATEROLE BYPASSRLS — Azure)
                                  รหัสผ่านส่งเป็นตัวแปร psql (`psql -v app_password=… -f db/roles.sql`) ไม่มีรหัสในไฟล์
   migration/V1__base.sql …       schema ทีละ version (ตาราง, index, RLS, grant) — SQL ล้วน ไม่ใช้ placeholder ของ Flyway, ไม่แก้ไฟล์ที่ใช้แล้ว
+  migration/afterMigrate.sql     Flyway callback หลัง migrate ทุกครั้ง (รันซ้ำได้): `GRANT SELECT ON flyway_schema_history TO an22_app` (ให้ validate ทางที่ 2 อ่านได้)
   seed/V1_1__seed_demo.sql …     ข้อมูลตัวอย่าง DEMO (dev / test เท่านั้น) — เลข version แทรกหลัง migration ที่มันต้องใช้
-scripts/db-apply.sh              รันด้วยมือ: `roles.sql` (ถ้าสั่ง `--roles`) → Flyway CLI (Docker image `flyway/flyway`) migrate `db/migration` (+ `db/seed` เมื่อ `--seed`)
-                                 ต่อ DB จาก env (`DB_URL`, `DB_OWNER_USER`, `DB_OWNER_PASSWORD`) — บันทึกลง `flyway_schema_history` เหมือนแอปรัน จึงไม่ซ้ำ / ไม่ข้ามไฟล์
+scripts/db-apply.sh              รันด้วยมือ (ต้องมี docker): `roles.sql` ด้วย psql ของ image postgres (ถ้าสั่ง `--roles`, env `DB_ADMIN_URL` / `DB_ADMIN_USER` / `DB_ADMIN_PASSWORD`)
+                                 → Flyway CLI (`flyway/flyway:12.4.0`) migrate `db/migration` (+ `db/seed` เมื่อ `--seed`) ด้วย `DB_MIGRATE_URL`, `DB_OWNER_USER`, `DB_OWNER_PASSWORD`
+                                 — env หรือ `.env` (ไม่ทับค่าที่ตั้งแล้ว); บันทึกลง `flyway_schema_history` เหมือนแอปรัน จึงไม่ซ้ำ / ไม่ข้ามไฟล์
 ```
 
-- **Flyway ต่อ PostgreSQL ตรง ไม่ผ่าน PgBouncer เสมอ** (ทั้งแอปและ `db-apply.sh`) — Flyway ใช้ advisory lock แบบ session ซึ่งพังใน transaction pooling; แอปจึงมี `DB_MIGRATE_URL` แยกจาก `DB_URL`
+- **Flyway migrate ต่อ PostgreSQL ตรง ไม่ผ่าน PgBouncer เสมอ** (ทั้งแอปและ `db-apply.sh`) — Flyway ใช้ advisory lock แบบ session ซึ่งพังใน transaction pooling; แอปจึงมี `DB_MIGRATE_URL` แยกจาก `DB_URL`
+  (ตกลง 2026-10-21: **validate** ของทางที่ 2 อ่าน `flyway_schema_history` อย่างเดียว ไม่มี lock → ใช้ DataSource ของแอป `an22_app` ผ่าน PgBouncer ได้ — แอปไม่ต้องรู้รหัส owner)
 - **ทางที่ 1 (ค่าเริ่ม)**: แอปรัน Flyway เองตอน start ด้วย role `an22_owner`
 - **ทางที่ 2 (คนรันเอง / DBA)**: `scripts/db-apply.sh` แล้วตั้ง `FLYWAY_MIGRATE=false` ให้แอป — แอปแค่ `validate` (version ใน DB ไม่ตรงกับไฟล์ → ไม่ start) และไม่ต้องรู้รหัสของ `an22_owner`
 - ไม่มี Docker / Flyway CLI: `psql -f` ทีละไฟล์ตามเลข version ได้บน **DB ว่าง** (ไฟล์เป็น SQL ล้วน) แต่ครั้งต่อไปต้องใช้ทางที่ 1 / 2 หลัง `flyway baseline` — เขียนวิธีไว้ใน `db/README.md`
-- dev: `compose.yaml` ใส่ `docker/initdb.sh` ใน `docker-entrypoint-initdb.d` ซึ่งเรียก `psql -v … -f db/roles.sql` (รหัสจาก `.env`); test: Testcontainers รัน `roles.sql` แล้ว migrate + seed (ตรงเข้า postgres) — แอปใน test ต่อผ่าน pgbouncer
+- dev: `compose.yaml` ใส่ `docker/initdb.sh` ใน `docker-entrypoint-initdb.d` ซึ่งสร้าง `azure_admin` (NOSUPERUSER CREATEDB CREATEROLE BYPASSRLS — จำลอง server admin ของ Azure) แล้ว `psql -U azure_admin -v … -f db/roles.sql` (รหัสจาก `.env`);
+  test: Testcontainers ใช้ `initdb.sh` / `roles.sql` / `pgbouncer.ini` ไฟล์เดียวกัน แล้วแอป migrate + seed (ตรงเข้า postgres) — แอปใน test ต่อผ่าน pgbouncer
 
 ## กติกาที่ใช้ทุกขั้น
 
@@ -100,7 +107,7 @@ scripts/db-apply.sh              รันด้วยมือ: `roles.sql` (�
   - ตาราง platform (`companies`, `billing_invoices`, …) ใช้กติกาเดียวกัน (`*_by` = ผู้ใช้ร้านตอนสมัคร / เปลี่ยนแพ็กเกจ หรือ platform admin)
   - **ไม่ส่งออก API** (interface TS ไม่มี field นี้ — ใช้ดูใน DB / export บริษัท); ไม่แทน field ธุรกิจเดิม (`cashier`, `voidedBy`, `createdBy` ของบิลพัก ฯลฯ ยังเก็บตาม spec)
 - ตาราง platform (`companies`, `billing_invoices`, `platform_admins`, `password_reset_tokens`, ตารางนับ login ผิด) ไม่อยู่ใต้ RLS
-- DB role 3 ตัว (สร้างด้วย `db/roles.sql` — ต้องใช้ superuser จึงไม่อยู่ใน migration; รหัสผ่านจาก env / ตัวแปร psql — ไม่อยู่ใน repo; migration ทำ grant):
+- DB role 3 ตัว (สร้างด้วย `db/roles.sql` — ต้องใช้ admin ระดับ server (CREATEROLE) จึงไม่อยู่ใน migration; รหัสผ่านจาก env / ตัวแปร psql — ไม่อยู่ใน repo; migration ทำ grant):
   - `an22_owner` — เจ้าของตาราง, Flyway ใช้ตัวนี้เท่านั้น
   - `an22_app` — แอปฝั่งร้าน: ไม่ใช่ owner, ไม่มี `BYPASSRLS`, `audit_log` ได้แค่ `INSERT` + `SELECT`, อ่าน `companies` ได้ (ตรวจบริษัทยังใช้งาน)
   - `an22_platform` — งาน platform + ก่อน login (login / signup / ลืมรหัสผ่าน หาบริษัทจากรหัส): `BYPASSRLS`
@@ -170,13 +177,15 @@ api รันได้หลาย instance หลัง load balancer โดย
 ### PgBouncer (บังคับ — ตกลงแล้ว 2026-10-21)
 - `pool_mode = transaction`; แอป (role `an22_app` / `an22_platform`) ต่อผ่าน PgBouncer เท่านั้น; `an22_owner` (Flyway) ต่อ PostgreSQL ตรง
 - PgBouncer **≥ 1.21** + `max_prepared_statements` > 0 (pgJDBC ใช้ server-side prepared statement หลังรันซ้ำ 5 ครั้ง — รุ่นเก่ากว่านี้ต้อง `prepareThreshold=0`)
-- auth `scram-sha-256`; รายชื่อผู้ใช้ / รหัสสร้างจาก env ตอน container start (ไม่มีรหัสใน repo); PostgreSQL รับ connection ของ app / platform จาก PgBouncer เท่านั้น (`pg_hba`)
+- auth `scram-sha-256`; dev / test: รายชื่อผู้ใช้ / รหัสสร้างจาก env ตอน container start (`docker/pgbouncer/start.sh`, ไม่มีรหัสใน repo); prod: PgBouncer ของ Azure ตรวจกับ PostgreSQL เอง
+- ~~PostgreSQL รับ connection ของ app / platform จาก PgBouncer เท่านั้น (`pg_hba`)~~ — **ตัดออก 2026-10-21** (Azure แก้ pg_hba ไม่ได้ และ PgBouncer อยู่เครื่องเดียวกับ DB):
+  แทนด้วย network (private access / firewall) + แอปไม่ start ถ้า `DB_URL` เป็น host:port เดียวกับ `DB_MIGRATE_URL`
 - **กติกาโค้ดที่ต้องตามเพราะ transaction pooling** (connection จริงเปลี่ยนตัวได้ทุก transaction):
   - ตั้งค่าได้แค่ `set_config(…, true)` / `SET LOCAL` — ห้าม `SET` แบบ session, ห้าม `LISTEN` / `NOTIFY`, ห้าม temp table ข้าม transaction, ห้าม cursor ค้างข้าม transaction
   - advisory lock ใช้แบบ `_xact_` เท่านั้น (`pg_try_advisory_xact_lock`) — แบบ session ห้าม
   - read-only ใช้ `BEGIN READ ONLY` ต่อ transaction (pgJDBC `readOnlyMode=transaction` ค่าเริ่ม) ไม่ใช่ session characteristics
   - ทุก query อยู่ใน transaction อยู่แล้ว (TxGuard) — query เดี่ยวนอก transaction ใน PgBouncer จะได้ connection ที่ไม่มี tenant
-- image PgBouncer + เวอร์ชันระบุแน่นอน เลือกตอนขั้น 0 (บอกผู้ใช้ก่อน)
+- image: `edoburu/pgbouncer:v1.25.2-p0` (ตกลง 2026-10-21 — เวอร์ชันเดียวกับ PgBouncer ในตัวของ Azure); `pgbouncer.ini` ตั้งเฉพาะค่าที่ Azure ตั้งได้
 - test ต้องวิ่งผ่าน PgBouncer จริง (จับ bug ที่เกิดเฉพาะ transaction pooling): RLS / tenant ไม่ค้างข้าม transaction เมื่อ PgBouncer สลับ connection, prepared statement ซ้ำหลายรอบผ่าน, advisory lock ของ job
 
 ### Log ต่อ request (ตกลงแล้ว 2026-10-21)
@@ -205,11 +214,20 @@ api รันได้หลาย instance หลัง load balancer โดย
   - หลัก: `db/roles.sql` — `ALTER ROLE an22_app / an22_platform SET statement_timeout = :'statement_timeout'` (เสนอ 30 วิ) + `idle_in_transaction_session_timeout` (เสนอ 60 วิ);
     `an22_owner` ไม่ตั้ง (migration อาจนาน) — ไม่ใส่ใน JDBC URL (`options` ไม่ผ่าน PgBouncer) และไม่ใส่ใน migration (ต้องสิทธิ์ superuser)
   - งานที่นานจริง (export, job billing): `SET LOCAL statement_timeout = '…'` ใน transaction นั้นเท่านั้น
-  - ตาข่ายสุดท้าย: PgBouncer `query_timeout` (เสนอ 600 วิ), `idle_transaction_timeout` (เสนอ 120 วิ)
+  - ~~ตาข่ายสุดท้าย: PgBouncer `query_timeout` / `idle_transaction_timeout`~~ — PgBouncer ของ Azure ไม่มีให้ตั้ง (2026-10-21): ตาข่ายคือค่าของ role ข้างบน
   - เกินเวลา → PostgreSQL `57014` → rollback → `ErrorHandler` ตอบ 503 `{ message }` (ข้อความยืนยันพร้อมข้อ 6 ของคำถามระหว่างทาง)
 - **แก้ spec ใน `../FrontEnd-An22` ก่อนขั้น 8** (endpoint แรกที่โดน; commit เดียว): `api-contract.md` + mock (ตรวจช่วง / เพดานแบบเดียวกัน) + spec ของ mock
   + หน้าบ้านเอา preset "ทั้งหมด" ออกจากหน้าการขาย / กะ และบังคับเลือกช่วงวันที่ — **ข้อความ error + ตัวเลข ยืนยันกับผู้ใช้ตอนนั้น**
 - paging จริง (server กรอง / เรียง / export) = งานแยกหลัง C2
+
+### Production: Azure Database for PostgreSQL Flexible Server (ผู้ใช้แจ้ง 2026-10-21)
+- PgBouncer = **ตัวในตัวของ Azure** (1.25.2, port 6432 host เดียวกับ server, ตามไปตอน HA failover; ไม่มีบน tier Burstable) — ตั้ง `pgbouncer.enabled`, `pool_mode = transaction`,
+  **`max_prepared_statements` > 0** (ค่าเริ่ม Azure = 0), `default_pool_size` ตามสูตร
+- **ไม่มี superuser**: server admin = NOSUPERUSER CREATEDB CREATEROLE (+ `azure_pg_admin`) → `db/roles.sql` เขียนให้รันด้วย admin แบบนี้ (test จำลองด้วย `azure_admin`)
+  - `an22_platform BYPASSRLS` บน PG16+ ผู้ตั้งต้องมี BYPASSRLS — Microsoft Q&A บอกว่า admin ทำได้ (ไม่ใช่เอกสารทางการ) → **ต้องลองบน Azure จริงก่อนขึ้น prod**;
+    ถ้าไม่ได้ ทางสำรอง: policy `TO an22_platform USING (true)` แทน BYPASSRLS (ถามผู้ใช้ตอนนั้น)
+- ไม่มี pg_hba → network (private access / firewall); TLS บังคับ → URL `sslmode=verify-full&sslrootcert=<CA ของ Azure>`; extension ต้องเปิดใน `azure.extensions` ก่อน migrate (เช่น `btree_gist` ขั้น 4)
+- รายการที่ต้องลองบน Azure จริง: `db/README.md` หัวข้อ "Production: Azure"
 
 ### Request
 - JWT: claims `sub`, `tenantId`, `role`, `branchIds` / `allBranches`; ร้าน vs platform แยกด้วย `aud` (`shop` / `platform`) — ใช้สลับกัน → 401; อายุ `JWT_TTL_DAYS` (ค่าเริ่ม 7)
@@ -217,6 +235,8 @@ api รันได้หลาย instance หลัง load balancer โดย
 - `X-Branch-Id`: ตรวจทุก request ยกเว้น `GET /me` (ไม่ใช่สาขาที่ใช้งาน / เข้าไม่ได้ → 403 "ไม่มีสิทธิ์ทำงานในสาขานี้"; งานเขียนสต็อก / ขาย / กะไม่มี → 400 ตาม E17 / E24)
 - `X-Terminal-Id`: ตรวจว่าเป็นเครื่องของ tenant (audit `terminalId` = null ถ้าไม่ใช่)
 - error ทุกตัว `{ "message": "<ไทย>" }` ข้อความตาม mock ทุกตัวอักษร; JSON ไม่ละ `null`; GET ห้ามแก้ข้อมูล
+- error ทั่วไป (ตกลง 2026-10-21): path ไม่มี / method ไม่รองรับ → 404 `ไม่มี endpoint <METHOD> <path ไม่รวม /api>` (เหมือน mock ไม่มี "Mock:");
+  JSON อ่านไม่ได้ / ชนิดข้อมูลผิด → 400 `ข้อมูลที่ส่งมาไม่ถูกต้อง`; อื่น → 500 `ระบบขัดข้อง กรุณาลองใหม่` (stack trace อยู่ใน log เท่านั้น); ไม่มี token → 401 `เซสชันหมดอายุ กรุณาเข้าสู่ระบบใหม่` (`SESSION_EXPIRED` ของ mock)
 - ไม่มีความลับใน repo / log / ข้อความ error: `DB_*_PASSWORD`, `JWT_SECRET`, `PII_KEYS`, `PII_HASH_KEY` (≥ 32 byte, ไม่ตั้ง = ไม่ start) จาก env; ไม่ log body ของ auth / header Authorization
 
 ### ทุกขั้นย่อย (Definition of done)
@@ -228,10 +248,10 @@ api รันได้หลาย instance หลัง load balancer โดย
 
 ## ขั้นย่อย
 
-### ขั้น 0 — โครงโปรเจกต์
+### ขั้น 0 — โครงโปรเจกต์ ✅ เสร็จ 2026-10-21
 - `mvnw` + `pom.xml` (Boot 4: web, security, oauth2-resource-server, jdbc, flyway + flyway-database-postgresql, postgresql, validation; test: testcontainers-postgresql)
-- `db/README.md`, `db/roles.sql`, `scripts/db-apply.sh` (ทดสอบ: DB ว่าง → `--roles --seed` ผ่าน, รันซ้ำไม่ทำอะไร)
-- `compose.yaml`: `postgres:18` + `pgbouncer` (transaction pooling, แอปต่อ port ของ pgbouncer) + `docker/initdb.sh` → `db/roles.sql` สร้าง database + role 3 ตัว (รหัสจาก `.env`); `.env.example` (ไม่มีค่าจริง), `.gitignore`
+- `db/README.md`, `db/roles.sql`, `scripts/db-apply.sh` (ทดสอบ: DB ว่าง → `--roles --seed` ผ่าน, รันซ้ำไม่ทำอะไร — ทำด้วยมือแล้ว 2026-10-21 ด้วย admin ที่ไม่ใช่ superuser)
+- `compose.yaml`: `postgres:18.6` + `pgbouncer` (transaction pooling, แอปต่อ port ของ pgbouncer) + `docker/initdb.sh` → `db/roles.sql` สร้าง database + role 3 ตัว (รหัสจาก `.env`); `.env.example` (ไม่มีค่าจริง), `.gitignore`
 - config `FLYWAY_MIGRATE` (`true` = migrate ตอน start, `false` = validate อย่างเดียว)
 - `PiiCipher` (เข้ารหัส / ถอด / HMAC, หลาย version) + test: ถอดกลับได้, ค่าเดิม 2 ครั้งได้ byte ต่างกัน, แก้ byte เดียว → ถอดไม่ได้, AAD คนละ tenant → ถอดไม่ได้,
   กุญแจเก่ายังอ่านได้หลังเพิ่ม version ใหม่, hash ของ `1-2345-67890-12-3` = `1234567890123` และต่างกันเมื่อ tenant ต่าง, ไม่ตั้ง env → ไม่ start (ข้อความไม่มีค่ากุญแจ)
@@ -241,9 +261,11 @@ api รันได้หลาย instance หลัง load balancer โดย
 - `DB_URL` (ผ่าน pgbouncer) / `DB_MIGRATE_URL` (ตรง) แยกกัน
 - `CLAUDE.md` ฉบับแรก (ตามหัวข้อ "สิ่งที่ CLAUDE.md ของแต่ละ repo ควรมี" ใน README: เวอร์ชัน, โครง package, คำสั่ง build / test / รัน / รีเซ็ต DB, กติกา schema, RLS, seed, ความปลอดภัย E49, JWT, การ port กฎ + fixtures, JSON)
 - test: context ขึ้นได้, `/api/healthz`, error format
+- ผล: `./mvnw verify` ผ่าน 41 test (unit 21 + integration 20: PiiCipher, ApiProperties, RequestLogFilter, roles.sql ด้วย admin จำลอง Azure, ผ่าน PgBouncer, prepared statement ซ้ำ 30 รอบ,
+  read-only ไม่ค้าง, `FLYWAY_MIGRATE=false`, error format, access log JSON); dev: compose + `spring-boot:run` → healthz / readyz / 401 ตรง, `DB_URL` = `DB_MIGRATE_URL` → ไม่ start
 
 ### ขั้น 1 — schema ฐาน + RLS + seed บริษัท / ผู้ใช้
-- migration `db/migration/V1__base.sql`: grant ให้ role, ตาราง platform (`companies`, `platform_admins`, `billing_invoices`, `password_reset_tokens`), `company_info`, `branches`, `users` (+ `user_branches`, partial unique owner), `menu_access`, `audit_log` (insert-only), `doc_counters`
+- migration `db/migration/V1__base.sql`: grant ให้ role (`flyway_schema_history` ได้จาก `afterMigrate.sql` แล้ว), ตาราง platform (`companies`, `platform_admins`, `billing_invoices`, `password_reset_tokens`), `company_info`, `branches`, `users` (+ `user_branches`, partial unique owner), `menu_access`, `audit_log` (insert-only), `doc_counters`
 - seed (`db/seed/V1_1__seed_demo.sql`): DEMO, HQ (`00000`) + BN, `admin` / `admin` (owner ตาม `fillOwner()`), `somchai` / `1234`, ผู้ใช้อื่นใน `SEED_USERS`, `company_info` จาก `SEED_STORE_INFO`, menu access ค่าเริ่ม, platform `platform` / `platform` — รหัสผ่านเป็น BCrypt
 - test: migrate บน DB ว่าง (ทั้งผ่านแอปและ `scripts/db-apply.sh`); RLS — ตั้ง tenant 1 ไม่เห็นแถวของ tenant 2 / ไม่ตั้ง = 0 แถว / INSERT ด้วย tenant อื่นถูกปฏิเสธ; `an22_app` UPDATE / DELETE `audit_log` ไม่ได้; `an22_app` ไม่มี BYPASSRLS และไม่ใช่ owner; unique รวม tenant (username ซ้ำได้ข้ามบริษัท); FK รวม tenant — `user_branches` อ้างสาขาของบริษัทอื่นไม่ได้; trigger ตั้ง `created_*` / `updated_*` ถูก (insert / update คนละผู้ใช้, แก้ `created_*` ทับไม่ได้)
 
@@ -352,7 +374,7 @@ api รันได้หลาย instance หลัง load balancer โดย
 ```sh
 ./mvnw verify                          # unit + integration (Testcontainers เปิด postgres:18 ว่างเอง)
 scripts/db-apply.sh --roles --seed      # รัน script DB ด้วยมือ (ทางที่ 2) บน DB ตาม env
-docker compose up -d db && ./mvnw spring-boot:run -Dspring-boot.run.profiles=dev   # dev DB + seed
+docker compose up -d && ./mvnw spring-boot:run -Dspring-boot.run.profiles=dev   # dev DB (postgres + pgbouncer) + seed
 docker compose down -v                 # รีเซ็ต DB local
 curl -s localhost:8080/api/healthz
 ```

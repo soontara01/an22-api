@@ -1,0 +1,60 @@
+# ค่าทั้งหมดมาจาก env (ชื่อตัวแปรตาม .env.example) — ไม่มีความลับในไฟล์นี้
+server:
+  port: 8080
+  servlet:
+    context-path: /api
+  shutdown: graceful
+  error:
+    whitelabel:
+      enabled: false
+
+spring:
+  application:
+    name: an22-api
+  main:
+    banner-mode: off
+  lifecycle:
+    timeout-per-shutdown-phase: 30s
+  # Flyway รันเองใน config/FlywayConfig (migrate ตรงเข้า postgres / validate ผ่าน PgBouncer)
+  flyway:
+    enabled: false
+  jackson:
+    # api-contract.md: ห้ามละ field ที่เป็น null (B24)
+    default-property-inclusion: always
+  mvc:
+    problemdetails:
+      enabled: false
+  autoconfigure:
+    exclude:
+      # ไม่มีผู้ใช้ในหน่วยความจำ — auth = JWT (ขั้น 2)
+      - org.springframework.boot.security.autoconfigure.UserDetailsServiceAutoConfiguration
+
+an22:
+  db:
+    url: ${DB_URL:}
+    migrate-url: ${DB_MIGRATE_URL:}
+    app-user: ${DB_APP_USER:an22_app}
+    app-password: ${DB_APP_PASSWORD:}
+    platform-user: ${DB_PLATFORM_USER:an22_platform}
+    platform-password: ${DB_PLATFORM_PASSWORD:}
+    owner-user: ${DB_OWNER_USER:an22_owner}
+    owner-password: ${DB_OWNER_PASSWORD:}
+    pool-size: ${DB_POOL_SIZE:10}
+    migrate: ${FLYWAY_MIGRATE:true}
+    locations: filesystem:db/migration
+  pii:
+    keys: ${PII_KEYS:}
+    hash-key: ${PII_HASH_KEY:}
+  log:
+    body: ${LOG_BODY:error}
+    body-max: ${LOG_BODY_MAX:4096}
+
+logging:
+  # JSON 1 บรรทัดต่อ event ไป stdout (ไม่เขียนไฟล์) — key-value ของ access log เป็น field ระดับบนสุด, MDC requestId ด้วย
+  structured:
+    format:
+      console: logstash
+  level:
+    root: info
+    # health (/healthz, /readyz) log ระดับ debug — ตั้ง LOGGING_LEVEL_ACCESS=debug เพื่อดู
+    access: info
