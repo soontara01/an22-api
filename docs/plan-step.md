@@ -196,6 +196,21 @@ api รันได้หลาย instance หลัง load balancer โดย
 - ไม่ log header (มี `Authorization`); ทุนที่ซ่อนจาก user ไม่เกี่ยว (log ไม่ถึงผู้ใช้) แต่ response ที่ log = ค่าหลังซ่อนแล้ว
 - test: บรรทัด access มีครบทุก field + `durationMs`, `LOG_BODY=error` ไม่มี body ตอน 2xx / มีตอน 400, mask ทุกชื่อในรายการ (ซ้อนลึก), path ที่ห้ามไม่มี body แม้ `all`, ตัดความยาว
 
+### จำกัดขนาดคำตอบ (ตกลงแล้ว 2026-10-21 — เปลี่ยน spec)
+ปัญหา: รายการทุกหน้าไม่มี paging (หน้าบ้านกรอง / เรียงเอง) และหน้าการขาย / กะมี preset "ทั้งหมด" → ร้านขาย 300 บิล / วัน 1 ปี ≈ 110,000 บิล ≈ 100–200 MB ใน request เดียว
+- **ช่วงวันที่บังคับ ≤ 366 วัน** (`from` และ `to` ต้องมีทั้งคู่) ที่ `GET /sales`, `/shifts`, `/shifts/variance-report`, `/credit-notes`, `/tax-invoices`, `/audit-log`, `/products/:id/movements`
+  — ไม่มี / เกิน → 400; query ด้วย `shiftId=` (รายการของกะเดียว) ไม่ต้องมีช่วงวันที่
+- **เพดานจำนวนแถว** `MAX_LIST_ROWS` (ค่าเริ่มเสนอ 20,000) ทุก list endpoint (รวม `/transfers`, `/products`): query `LIMIT max + 1` → เกิน = 400 บอกให้ลดช่วง (ไม่ตัดเงียบ ๆ — รายงานจะผิดโดยไม่รู้ตัว)
+- DB timeout (กัน query / transaction ค้าง):
+  - หลัก: `db/roles.sql` — `ALTER ROLE an22_app / an22_platform SET statement_timeout = :'statement_timeout'` (เสนอ 30 วิ) + `idle_in_transaction_session_timeout` (เสนอ 60 วิ);
+    `an22_owner` ไม่ตั้ง (migration อาจนาน) — ไม่ใส่ใน JDBC URL (`options` ไม่ผ่าน PgBouncer) และไม่ใส่ใน migration (ต้องสิทธิ์ superuser)
+  - งานที่นานจริง (export, job billing): `SET LOCAL statement_timeout = '…'` ใน transaction นั้นเท่านั้น
+  - ตาข่ายสุดท้าย: PgBouncer `query_timeout` (เสนอ 600 วิ), `idle_transaction_timeout` (เสนอ 120 วิ)
+  - เกินเวลา → PostgreSQL `57014` → rollback → `ErrorHandler` ตอบ 503 `{ message }` (ข้อความยืนยันพร้อมข้อ 6 ของคำถามระหว่างทาง)
+- **แก้ spec ใน `../FrontEnd-An22` ก่อนขั้น 8** (endpoint แรกที่โดน; commit เดียว): `api-contract.md` + mock (ตรวจช่วง / เพดานแบบเดียวกัน) + spec ของ mock
+  + หน้าบ้านเอา preset "ทั้งหมด" ออกจากหน้าการขาย / กะ และบังคับเลือกช่วงวันที่ — **ข้อความ error + ตัวเลข ยืนยันกับผู้ใช้ตอนนั้น**
+- paging จริง (server กรอง / เรียง / export) = งานแยกหลัง C2
+
 ### Request
 - JWT: claims `sub`, `tenantId`, `role`, `branchIds` / `allBranches`; ร้าน vs platform แยกด้วย `aud` (`shop` / `platform`) — ใช้สลับกัน → 401; อายุ `JWT_TTL_DAYS` (ค่าเริ่ม 7)
 - ทุก request ของร้าน: อ่านผู้ใช้ + บริษัทจาก DB (สิทธิ์สาขามีผลทันที) — บริษัทไม่ active / ผู้ใช้ปิด / ลบแล้ว → 401
@@ -280,6 +295,7 @@ api รันได้หลาย instance หลัง load balancer โดย
 - path fixtures: `../FrontEnd-An22/docs/backend/fixtures` (ตั้งทับได้ด้วย system property `fixtures.dir` สำหรับ CI)
 
 ### ขั้น 8 — กะ + ล็อก POS + บิลพัก (E48)
+- **ก่อนเริ่ม**: แก้ spec ใน `../FrontEnd-An22` เรื่องจำกัดช่วงวันที่ / เพดานแถว (หัวข้อ "จำกัดขนาดคำตอบ") — ถามข้อความ + ตัวเลขกับผู้ใช้ก่อน
 - migration: `shifts` (+ `locked_at`, partial unique กะเปิด 1 กะต่อเครื่อง), `shift_counts`, `cash_movements`, `drawer_opens`, `shift_adjustments`, `held_bills` (`payload_enc bytea` — เข้ารหัส)
 - กฎ: `ShiftRules` ทั้งหมด (`shiftBlocker`, `openShiftError`, `countCheck`, `closeShiftError`, `shiftSummary`, `varianceReport`, …), `PosTerminalRules.terminalError`
 - endpoint: `/shifts/*` ทั้งหมด รวม `lock` / `unlock` (คนเปิดกะหรือ admin, ข้อความตาม contract), `/pos/held-bills`; เติม `requireShiftChangeError` ให้ `PUT /settings/store|company`, ปิดสาขา / เครื่องที่มีกะเปิด
@@ -328,7 +344,8 @@ api รันได้หลาย instance หลัง load balancer โดย
 3. ขั้น 10: เพิ่ม fixtures `credit-note.json` ฝั่งหน้าบ้านก่อนหรือไม่
 4. ขั้น 12: `GET /platform/outbox` ไม่มีใน api จริง — หน้า platform ต้องซ่อนเมนูนี้เมื่อไม่ใช่ mock หรือไม่
 5. ขั้น 9: ข้อความ error เมื่อ `reference` เป็นเลขบัตรเต็ม (แก้ spec หน้าบ้านก่อน)
-6. ระยะเก็บเอกสารภาษีก่อน purge (E39) — ยังรอนักบัญชี: purge ตามเดิมไปก่อน
+6. ก่อนขั้น 8: ข้อความ error + ตัวเลข (ช่วงวันที่สูงสุด, `MAX_LIST_ROWS`, `statement_timeout`) ของการจำกัดขนาดคำตอบ (แก้ spec หน้าบ้านก่อน)
+7. ระยะเก็บเอกสารภาษีก่อน purge (E39) — ยังรอนักบัญชี: purge ตามเดิมไปก่อน
 
 ## วิธีตรวจ (ทุกขั้น)
 
