@@ -16,7 +16,7 @@
 | ภาษา / framework | Java 25 (Temurin ที่มีในเครื่อง) + Spring Boot 4.x รุ่นล่าสุด (Spring Framework 7, Jackson 3) |
 | build | Maven + `mvnw` (wrapper อยู่ใน repo) |
 | DB access | Spring JDBC (`JdbcClient`) — SQL ตรง, ไม่มี JPA / Hibernate (จึงไม่มี `ddl-auto` เลย); transaction ด้วย `@Transactional` ที่ service (หัวข้อ "Transaction") |
-| DB | PostgreSQL 18 — dev: `compose.yaml`, test: Testcontainers (image เดียวกัน) |
+| DB | PostgreSQL 18 + **PgBouncer (บังคับ, transaction pooling)** — dev: `compose.yaml`, test: Testcontainers (postgres + pgbouncer ชุดเดียวกัน) |
 | migration | Flyway — SQL อยู่ที่ `db/` (root ของ repo) เป็น SQL ล้วน รันได้ทั้งจากแอปและด้วยมือ (หัวข้อ "script DB") |
 | JWT | Spring Security + `oauth2-resource-server` (Nimbus) HS256, secret จาก env |
 | เงินในกฎที่ port | `double` + `round2` แบบ JS (`Math.floor(x * 100 + 0.5) / 100`) ให้ตรง fixtures; แปลงเป็น `BigDecimal` scale 2 ตอนเก็บ `numeric(14,2)` |
@@ -65,16 +65,20 @@ scripts/db-apply.sh              รันด้วยมือ: `roles.sql` (�
                                  ต่อ DB จาก env (`DB_URL`, `DB_OWNER_USER`, `DB_OWNER_PASSWORD`) — บันทึกลง `flyway_schema_history` เหมือนแอปรัน จึงไม่ซ้ำ / ไม่ข้ามไฟล์
 ```
 
+- **Flyway ต่อ PostgreSQL ตรง ไม่ผ่าน PgBouncer เสมอ** (ทั้งแอปและ `db-apply.sh`) — Flyway ใช้ advisory lock แบบ session ซึ่งพังใน transaction pooling; แอปจึงมี `DB_MIGRATE_URL` แยกจาก `DB_URL`
 - **ทางที่ 1 (ค่าเริ่ม)**: แอปรัน Flyway เองตอน start ด้วย role `an22_owner`
 - **ทางที่ 2 (คนรันเอง / DBA)**: `scripts/db-apply.sh` แล้วตั้ง `FLYWAY_MIGRATE=false` ให้แอป — แอปแค่ `validate` (version ใน DB ไม่ตรงกับไฟล์ → ไม่ start) และไม่ต้องรู้รหัสของ `an22_owner`
 - ไม่มี Docker / Flyway CLI: `psql -f` ทีละไฟล์ตามเลข version ได้บน **DB ว่าง** (ไฟล์เป็น SQL ล้วน) แต่ครั้งต่อไปต้องใช้ทางที่ 1 / 2 หลัง `flyway baseline` — เขียนวิธีไว้ใน `db/README.md`
-- dev: `compose.yaml` ใส่ `docker/initdb.sh` ใน `docker-entrypoint-initdb.d` ซึ่งเรียก `psql -v … -f db/roles.sql` (รหัสจาก `.env`); test: Testcontainers รัน `roles.sql` แล้ว migrate + seed
+- dev: `compose.yaml` ใส่ `docker/initdb.sh` ใน `docker-entrypoint-initdb.d` ซึ่งเรียก `psql -v … -f db/roles.sql` (รหัสจาก `.env`); test: Testcontainers รัน `roles.sql` แล้ว migrate + seed (ตรงเข้า postgres) — แอปใน test ต่อผ่าน pgbouncer
 
 ## กติกาที่ใช้ทุกขั้น
 
 ### Schema
 - ทุกตารางข้อมูล: `tenant_id bigint not null` (+ `branch_id` ตามระดับใน `data-model.md`), `ENABLE` + `FORCE ROW LEVEL SECURITY`,
   policy `USING / WITH CHECK (tenant_id = current_setting('app.tenant_id', true)::bigint)` — ไม่ตั้งค่า = ไม่เห็นอะไรเลย
+- **ชื่อตาราง** (ตกลงแล้ว 2026-10-21): ทุกตารางขึ้นต้นด้วย `dt_` ตัวเล็ก snake_case (`dt_sales`, `dt_sale_lines`, `dt_companies`, `dt_audit_log`, …)
+  ไม่ใส่ `"..."` ใน SQL (เขียน `DT_SALES` ก็ได้ผลเดียวกัน); ยกเว้น `flyway_schema_history` ของ Flyway —
+  **ชื่อตารางในไฟล์นี้และใน `data-model.md` เขียนแบบไม่มี prefix: ชื่อจริงใน DB = `dt_` + ชื่อนั้น**; คอลัมน์ / function / trigger / role ไม่มี prefix
 - index / unique ขึ้นต้นด้วย `tenant_id`; ชื่อ snake_case
 - **FK** (ตกลงแล้ว 2026-10-20):
   - **มี FK** ทุกความสัมพันธ์หลัก (เช่น `sale_lines → sales / products`, `branch_stock → branches`, `shifts → pos_terminals`) แบบรวม `(tenant_id, <ref>_id) → (tenant_id, id)`
@@ -101,7 +105,12 @@ scripts/db-apply.sh              รันด้วยมือ: `roles.sql` (�
   - `an22_app` — แอปฝั่งร้าน: ไม่ใช่ owner, ไม่มี `BYPASSRLS`, `audit_log` ได้แค่ `INSERT` + `SELECT`, อ่าน `companies` ได้ (ตรวจบริษัทยังใช้งาน)
   - `an22_platform` — งาน platform + ก่อน login (login / signup / ลืมรหัสผ่าน หาบริษัทจากรหัส): `BYPASSRLS`
   - แอปมี DataSource 2 ตัว (app / platform); ห้ามใช้ `SET` แบบ session (connection pool)
-- เลขเอกสาร: ตาราง `doc_counters (tenant_id, prefix, last_no)` + `INSERT … ON CONFLICT DO UPDATE … RETURNING` (ล็อกแถว ไม่ชนเมื่อขายพร้อมกัน); วันในเลข = วันท้องถิ่น Asia/Bangkok
+- เลขเอกสาร (`db/DocNumbers`, เรียกจาก service): ตาราง `doc_counters (tenant_id, prefix, last_no)` PK `(tenant_id, prefix)` + `INSERT … ON CONFLICT DO UPDATE SET last_no = last_no + 1 … RETURNING`
+  - อยู่ใน transaction เดียวกับเอกสาร → rollback แล้วเลขไม่ข้าม (ไม่ใช้ `SEQUENCE` — เลขหายเมื่อ rollback); prefix ใหม่ = เริ่ม 1 เอง
+  - ล็อกแถวตัวนับจน commit → ไม่ซ้ำแม้หลาย instance / ผ่าน PgBouncer; **ออกเลขหลังตรวจกฎผ่านหมดแล้ว** (ถือล็อกสั้นที่สุด)
+  - วันในเลข = วันท้องถิ่น Asia/Bangkok (`Clock`); รหัสสาขา = `Branch.code` ณ ตอนออก (ใบกำกับใช้สาขาของบิล E25)
+  - `SUB-YYYYMM-NNNN` (ใบแจ้งหนี้ SaaS ไม่ซ้ำทั้งแพลตฟอร์ม) ใช้ตัวนับฝั่ง platform `platform_doc_counters (prefix, last_no)` (ไม่อยู่ใต้ RLS, role platform) วิธีเดียวกัน
+  - test: ออกเลขพร้อมกันหลาย thread prefix เดียวกัน → ไม่ซ้ำ ไม่ข้าม; rollback → เลขถัดไปไม่ข้าม
 
 ### ข้อมูลส่วนบุคคล (ตกลงแล้ว 2026-10-20)
 - **เข้ารหัสในแอป** (`security/PiiCipher`, AES-256-GCM, nonce สุ่มต่อค่า) เก็บเป็น `bytea` ขึ้นต้นด้วยเลข version ของกุญแจ (หมุนกุญแจได้: อ่านได้ทุก version, เขียนด้วยตัวล่าสุด)
@@ -140,6 +149,31 @@ scripts/db-apply.sh              รันด้วยมือ: `roles.sql` (�
 - เลขเอกสาร (`doc_counters`) อยู่ใน transaction เดียวกับเอกสาร — rollback แล้วเลขไม่หาย / ไม่ข้าม
 - test: transaction ซ้อนไม่รั่ว tenant ข้าม request (connection เดิมจาก pool ไม่มีค่า tenant ค้าง), query นอก transaction → error, GET เขียนไม่ได้
 
+### Stateless / scale แนวนอน (ตกลงแล้ว 2026-10-21)
+api รันได้หลาย instance หลัง load balancer โดยไม่ต้อง sticky session — **ไม่มี state ใน memory / disk ของ instance**; state ทั้งหมดอยู่ใน PostgreSQL
+- **auth**: JWT ตรวจได้ทุก instance (`JWT_SECRET` เดียวกัน, header `kid` เพื่อหมุน secret ได้: ตรวจได้ทั้งตัวเก่า / ใหม่ช่วงเปลี่ยน); สิทธิ์ / บริษัทอ่านจาก DB ทุก request (ไม่ cache ใน instance)
+- **ตัวนับ login ผิด, เลขเอกสาร, บิลพัก, ล็อก POS** อยู่ใน DB (ไม่ใช่ memory) — instance ไหนรับ request ก็เห็นค่าเดียวกัน
+- **job ตามเวลา** (`@Scheduled` billing / ระงับ / purge): ทุก instance ตื่นพร้อมกัน → ทำงานจริงตัวเดียวด้วย `pg_try_advisory_xact_lock(<job id>)`
+  + กันซ้ำชั้นที่สองด้วย unique (บริษัท, รอบบิล) — ตรวจตอน login / `me` ก็ใช้กติกาเดียวกัน
+- **Flyway ตอน start หลาย instance พร้อมกัน**: Flyway ล็อก `flyway_schema_history` เอง (รอกัน ไม่รันซ้ำ); production แนะนำ "ทางที่ 2" (รัน migrate ครั้งเดียวก่อน deploy, แอป `FLYWAY_MIGRATE=false`)
+- **ไฟล์**: ไม่เขียนไฟล์ลง disk ของ instance — export บริษัทตอบเป็น stream ตรง; ถ้าทำเป็น job + ลิงก์ดาวน์โหลดภายหลัง ไฟล์ต้องอยู่ที่ storage กลาง (DB / object storage)
+- **connection**: แอปต่อผ่าน PgBouncer เสมอ (หัวข้อ "PgBouncer") — pool ของ instance (Hikari `DB_POOL_SIZE`) ต่อ PgBouncer, PgBouncer คุมจำนวน connection จริงเข้า PostgreSQL (`default_pool_size` × user ≤ `max_connections`)
+- **ปิดเครื่องนุ่มนวล**: `server.shutdown=graceful` (รอ request ที่ค้างให้จบ) + health แยก `GET /api/healthz` (liveness, ไม่แตะ DB) / `GET /api/readyz` (readiness, ping DB) ให้ load balancer
+- **log** เป็น JSON ไป stdout (ไม่เขียนไฟล์), มี request id (รับ `X-Request-Id` จาก web ถ้ารูปแบบถูก ไม่งั้นสุ่ม) ไว้ตามข้าม instance
+- **เวลา**: instance ใช้ UTC, วันธุรกิจคิดด้วย `Clock` Asia/Bangkok ในโค้ด (ไม่พึ่ง timezone ของเครื่อง)
+
+### PgBouncer (บังคับ — ตกลงแล้ว 2026-10-21)
+- `pool_mode = transaction`; แอป (role `an22_app` / `an22_platform`) ต่อผ่าน PgBouncer เท่านั้น; `an22_owner` (Flyway) ต่อ PostgreSQL ตรง
+- PgBouncer **≥ 1.21** + `max_prepared_statements` > 0 (pgJDBC ใช้ server-side prepared statement หลังรันซ้ำ 5 ครั้ง — รุ่นเก่ากว่านี้ต้อง `prepareThreshold=0`)
+- auth `scram-sha-256`; รายชื่อผู้ใช้ / รหัสสร้างจาก env ตอน container start (ไม่มีรหัสใน repo); PostgreSQL รับ connection ของ app / platform จาก PgBouncer เท่านั้น (`pg_hba`)
+- **กติกาโค้ดที่ต้องตามเพราะ transaction pooling** (connection จริงเปลี่ยนตัวได้ทุก transaction):
+  - ตั้งค่าได้แค่ `set_config(…, true)` / `SET LOCAL` — ห้าม `SET` แบบ session, ห้าม `LISTEN` / `NOTIFY`, ห้าม temp table ข้าม transaction, ห้าม cursor ค้างข้าม transaction
+  - advisory lock ใช้แบบ `_xact_` เท่านั้น (`pg_try_advisory_xact_lock`) — แบบ session ห้าม
+  - read-only ใช้ `BEGIN READ ONLY` ต่อ transaction (pgJDBC `readOnlyMode=transaction` ค่าเริ่ม) ไม่ใช่ session characteristics
+  - ทุก query อยู่ใน transaction อยู่แล้ว (TxGuard) — query เดี่ยวนอก transaction ใน PgBouncer จะได้ connection ที่ไม่มี tenant
+- image PgBouncer + เวอร์ชันระบุแน่นอน เลือกตอนขั้น 0 (บอกผู้ใช้ก่อน)
+- test ต้องวิ่งผ่าน PgBouncer จริง (จับ bug ที่เกิดเฉพาะ transaction pooling): RLS / tenant ไม่ค้างข้าม transaction เมื่อ PgBouncer สลับ connection, prepared statement ซ้ำหลายรอบผ่าน, advisory lock ของ job
+
 ### Request
 - JWT: claims `sub`, `tenantId`, `role`, `branchIds` / `allBranches`; ร้าน vs platform แยกด้วย `aud` (`shop` / `platform`) — ใช้สลับกัน → 401; อายุ `JWT_TTL_DAYS` (ค่าเริ่ม 7)
 - ทุก request ของร้าน: อ่านผู้ใช้ + บริษัทจาก DB (สิทธิ์สาขามีผลทันที) — บริษัทไม่ active / ผู้ใช้ปิด / ลบแล้ว → 401
@@ -160,12 +194,13 @@ scripts/db-apply.sh              รันด้วยมือ: `roles.sql` (�
 ### ขั้น 0 — โครงโปรเจกต์
 - `mvnw` + `pom.xml` (Boot 4: web, security, oauth2-resource-server, jdbc, flyway + flyway-database-postgresql, postgresql, validation; test: testcontainers-postgresql)
 - `db/README.md`, `db/roles.sql`, `scripts/db-apply.sh` (ทดสอบ: DB ว่าง → `--roles --seed` ผ่าน, รันซ้ำไม่ทำอะไร)
-- `compose.yaml`: `postgres:18` + `docker/initdb.sh` → `db/roles.sql` สร้าง database + role 3 ตัว (รหัสจาก `.env`); `.env.example` (ไม่มีค่าจริง), `.gitignore`
+- `compose.yaml`: `postgres:18` + `pgbouncer` (transaction pooling, แอปต่อ port ของ pgbouncer) + `docker/initdb.sh` → `db/roles.sql` สร้าง database + role 3 ตัว (รหัสจาก `.env`); `.env.example` (ไม่มีค่าจริง), `.gitignore`
 - config `FLYWAY_MIGRATE` (`true` = migrate ตอน start, `false` = validate อย่างเดียว)
 - `PiiCipher` (เข้ารหัส / ถอด / HMAC, หลาย version) + test: ถอดกลับได้, nonce ไม่ซ้ำ, แก้ byte เดียว → ถอดไม่ได้, กุญแจเก่ายังอ่านได้
-- `application.yml`: context path `/api`, port 8080, Jackson ไม่ละ null + ISO-8601, `TZ` ของกฎ = Asia/Bangkok, health `GET /api/healthz`
+- `application.yml`: context path `/api`, port 8080, Jackson ไม่ละ null + ISO-8601, `TZ` ของกฎ = Asia/Bangkok, health `GET /api/healthz` (liveness) + `GET /api/readyz` (ping DB), `server.shutdown=graceful`, log JSON → stdout + request id
 - `ApiException` + `ErrorHandler` (`{ message }`, 404 ทั่วไป, 400 JSON อ่านไม่ได้, 500 ไม่เปิดเผยรายละเอียด)
-- test support: Postgres container singleton + Flyway migrate (รวม seed) + MockMvc
+- test support: Postgres + PgBouncer container (network เดียวกัน, singleton) — Flyway migrate (รวม seed) ตรงเข้า postgres, DataSource ของแอปผ่าน pgbouncer + MockMvc
+- `DB_URL` (ผ่าน pgbouncer) / `DB_MIGRATE_URL` (ตรง) แยกกัน
 - `CLAUDE.md` ฉบับแรก (ตามหัวข้อ "สิ่งที่ CLAUDE.md ของแต่ละ repo ควรมี" ใน README: เวอร์ชัน, โครง package, คำสั่ง build / test / รัน / รีเซ็ต DB, กติกา schema, RLS, seed, ความปลอดภัย E49, JWT, การ port กฎ + fixtures, JSON)
 - test: context ขึ้นได้, `/api/healthz`, error format
 
@@ -199,6 +234,15 @@ scripts/db-apply.sh              รันด้วยมือ: `roles.sql` (�
 - migration: `products`, `product_pack_units`, `product_suppliers`, `branch_stock`, `stock_movements`, `serial_numbers`
 - กฎ: `ProductRules`, `Costing` (`movingAverage`, `buildStockCard`, …), `SerialRules`, `Money` (`moneyInputError`), กฎ SKU ที่อยู่ใน mock (`validateSku`, `receiptCostError`, การลบที่ถูกอ้าง)
 - endpoint: `/products` (+ `stock`, `movements`, `branch-stock`, `serials`, `serials/remove`); audit `stock_out`, `serial_remove`
+- **`StockLedger`** (service ภายใน — จุดเดียวที่แก้สต็อก; ขาย / void / ใบลดหนี้ / ใบเปลี่ยน / โอน / รับเข้า / ปรับ / serial เรียกตัวนี้):
+  1. `INSERT branch_stock … ON CONFLICT DO NOTHING` (ไม่มีแถว = 0) → 2. `SELECT … FOR UPDATE` → 3. คิดในแอปด้วย `Costing` (รับเข้า `movingAverage()`, ตัดออก avg คงเดิม + COGS)
+  → 4. `UPDATE branch_stock` → 5. `INSERT stock_movements` พร้อมยอดคงเหลือหลังรายการ
+  - ไม่ใช้ `UPDATE … SET stock = stock - :qty` ตรง ๆ เพราะทุนเฉลี่ยต้องคิดด้วยกฎที่ port มา (ตรงหน้าบ้าน) และ movement ต้องรู้ยอดหลังรายการ
+  - ตรวจไม่พอหลังล็อก (400 ข้อความตาม mock) + `CHECK (stock >= 0)`; บิลหลายบรรทัดล็อก**เรียงตาม `product_id`** (กัน deadlock); pack unit แปลงเป็นหน่วยฐานก่อน
+  - ล็อกหลังตรวจกฎผ่านแล้ว (คู่กับออกเลขเอกสาร) ปล่อยตอน commit
+  - serial: `UPDATE serial_numbers SET status = … WHERE id = … AND status = 'in_stock' AND branch_id = …` ต้องได้ 1 แถว (0 = ถูกขายตัดหน้า → 400); `stock` / `avg_cost` ของ SKU serial = นับ / เฉลี่ย serial `in_stock` ของสาขา
+  - บริการ: ไม่มีสต็อก / movement, COGS = `cost` × qty
+  - test: ขายสินค้าเดียวกันพร้อมกันหลาย thread → ยอดถูก ไม่ติดลบ; 2 บิลสินค้าสลับลำดับพร้อมกัน → ไม่ deadlock; serial เดียวกันขายพร้อมกัน → สำเร็จ 1
 - **ซ่อนทุน (E43 / E44)**: `CostHidingAdvice` — ทุก response ของคนที่ `canSeeCost` = false: key ใน `COST_FIELDS` → `null` ทุกระดับ + `{qty, avgCost, value}` → `value: null`; ขาเข้า SKU ไม่ใช้ `cost` / `suppliers[].cost` (คงค่าเดิม / ใหม่ = 0)
 - seed: สินค้า + สต็อกยกมา (`opening`) ของ HQ / BN ตามผลของ `migrateCosting` / `migrateBranchStock` / `syncSerials` ใน mock
 - test: ทุนเฉลี่ยตรงตัวอย่าง spec, สต็อกต่อสาขา, `user` ได้ทุนเป็น null ทุก endpoint ของขั้นนี้, `staffSeeCost` = true แล้วเห็น
@@ -234,7 +278,7 @@ scripts/db-apply.sh              รันด้วยมือ: `roles.sql` (�
 
 ### ขั้น 11 — ส่วน SaaS ของบริษัท
 - `GET /audit-log` (`AuditRules.filterAuditEvents`, `parseAuditQuery`), `GET /company/onboarding`, `GET /company/subscription`, `PUT /company/plan`
-- billing: job รายวัน (`@Scheduled`) ออกใบแจ้งหนี้ `SUB-YYYYMM-NNNN` + ระงับเมื่อพ้นผ่อนผัน — และตรวจตอน login / `me` ด้วย (contract ให้มีผลทุก request); `actorKind: 'system'`
+- billing: job รายวัน (`@Scheduled` + advisory lock — ทำงานตัวเดียวแม้หลาย instance) ออกใบแจ้งหนี้ `SUB-YYYYMM-NNNN` + ระงับเมื่อพ้นผ่อนผัน — และตรวจตอน login / `me` ด้วย (contract ให้มีผลทุก request); `actorKind: 'system'`
 - `POST /auth/signup` (ใช้ role platform สร้างบริษัท; audit `signup`), `POST /auth/forgot-password` (ตอบข้อความเดียวเสมอ, token เก็บ hash, ลิงก์จาก `APP_BASE_URL` ไม่ใช่ `Host`), `POST /auth/reset-password` (audit `password_reset`)
 - `GET /company/export` (ไม่มีรหัสผ่าน / token; ข้อมูลผู้ซื้อถอดรหัสแล้ว), `GET|POST|DELETE /company/deletion`; ระหว่างรอลบ: เฉพาะ owner, endpoint อื่น → 403
 - test: billing ตาม `subscription.model.spec.ts` ด้วย `Clock` ปลอม, ลิงก์ไม่ใช้ header `Host`
@@ -247,6 +291,7 @@ scripts/db-apply.sh              รันด้วยมือ: `roles.sql` (�
 
 ### ขั้น 13 — ปิดงาน / พร้อม C3
 - test กวาดข้าม tenant ทุก endpoint (ตาราง endpoint → อ่าน / เขียน id ของบริษัท B ด้วย token A → 404)
+- **test หลาย instance**: compose เปิด api 2 ตัวหลัง load balancer ง่าย ๆ → login ตัวหนึ่ง ใช้ token กับอีกตัว, ขายพร้อมกันจาก 2 ตัวเลขบิลไม่ซ้ำ, job billing ทำงานครั้งเดียว
 - `Dockerfile` (image ของ api) + `compose.yaml` profile รวม postgres + api (+ an22-web จาก image ของมัน — ไม่แก้ repo web)
 - ทดลองกับหน้าบ้านจริง: build หน้าบ้านด้วย `useMock: false` ชั่วคราว (ไม่ commit ในหน้าบ้าน) ผ่าน an22-web → login DEMO, ขาย, ปิดกะ
 - อัปเดต `../FrontEnd-An22/docs/backend/README.md` หัวข้อ api ("ทำแล้ว C2 …") + `next-steps-plan.md` — บอกผู้ใช้ก่อน
