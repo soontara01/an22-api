@@ -113,11 +113,13 @@ scripts/db-apply.sh              รันด้วยมือ: `roles.sql` (�
   - test: ออกเลขพร้อมกันหลาย thread prefix เดียวกัน → ไม่ซ้ำ ไม่ข้าม; rollback → เลขถัดไปไม่ข้าม
 
 ### ข้อมูลส่วนบุคคล (ตกลงแล้ว 2026-10-20)
-- **เข้ารหัสในแอป** (`security/PiiCipher`, AES-256-GCM, nonce สุ่มต่อค่า) เก็บเป็น `bytea` ขึ้นต้นด้วยเลข version ของกุญแจ (หมุนกุญแจได้: อ่านได้ทุก version, เขียนด้วยตัวล่าสุด)
+- **เข้ารหัสในแอป** (`security/PiiCipher`, AES-256-GCM, nonce สุ่มต่อค่า) เก็บเป็น `bytea` = `[version กุญแจ 1 byte][nonce 12 byte][ciphertext + tag]` (หมุนกุญแจได้: อ่านได้ทุก version, เขียนด้วยตัวล่าสุด)
+  - **AAD** = `<ตาราง>.<ช่อง>:<tenant_id>` (เช่น `tax_invoices.buyer:1`) — copy ค่าที่เข้ารหัสไปแถวของบริษัทอื่น / ช่องอื่นแล้วถอดไม่ได้
   - ผู้ซื้อในใบกำกับ / ใบลดหนี้ (`TaxInvoiceBuyer`: ชื่อ, `idType`, เลขผู้เสียภาษี / บัตรประชาชน / passport, สาขา, ที่อยู่) → `buyer_enc bytea` ทั้งก้อน
-    + `buyer_tax_id_hash bytea` = HMAC-SHA256 (กุญแจแยก) ของเลขที่ normalize แล้ว + index — ใช้กับ `GET /tax-invoices/buyer?taxId=` (ค้นได้แบบตรงทั้งเลขเท่านั้น)
+    + `buyer_tax_id_hash bytea` = HMAC-SHA256 (กุญแจแยก) ของ `<tenant_id>:<เลขที่ normalize แล้ว>` (ตัดช่องว่าง / `-`, ตัวใหญ่) + index `(tenant_id, buyer_tax_id_hash)`
+    — มี tenant ใน hash: คนเดียวกันซื้อต่างบริษัทได้ hash ต่างกัน (DB หลุดก็จับคู่ข้ามบริษัทไม่ได้) — ใช้กับ `GET /tax-invoices/buyer?taxId=` (ค้นได้แบบตรงทั้งเลขเท่านั้น)
   - `held_bills.payload` → `payload_enc bytea` ทั้งก้อน (ไม่ query ข้างใน)
-- กุญแจจาก env (`PII_KEYS` = `<version>:<base64 32 byte>,…`, `PII_HASH_KEY`) — ไม่อยู่ใน DB / repo / log; ไม่ตั้ง = ไม่ start; **สำรองกุญแจแยกจาก backup ของ DB** (กุญแจหาย = ข้อมูลผู้ซื้อหาย) — เขียนไว้ใน `CLAUDE.md` / `db/README.md`
+- กุญแจจาก env (`PII_KEYS` = `<version>:<base64 32 byte>,…`, `PII_HASH_KEY`; สร้างด้วย `openssl rand -base64 32`; ทุก instance ต้องได้ชุดเดียวกัน — หมุน: deploy ให้ทุกตัวอ่านกุญแจใหม่ได้ก่อน แล้วค่อยเขียนด้วยกุญแจใหม่) — ไม่อยู่ใน DB / repo / log; ไม่ตั้ง = ไม่ start; **สำรองกุญแจแยกจาก backup ของ DB** (กุญแจหาย = ข้อมูลผู้ซื้อหาย) — เขียนไว้ใน `CLAUDE.md` / `db/README.md`
 - **ไม่ใช้** pgcrypto (กุญแจผ่าน SQL → อาจลง log / `pg_stat_statements`), ไม่ hash อย่างเดียว (ต้องพิมพ์ใบกำกับได้)
 - **เก็บ text ตามเดิม**: อีเมล / ชื่อผู้ใช้ (ต้อง unique + login), ข้อมูลบริษัท / สาขา / ผู้จำหน่าย (ข้อมูลธุรกิจที่พิมพ์บนเอกสาร) — ป้องกันด้วย RLS + เข้ารหัส disk / backup + ไม่ log
 - **บัตรเครดิต: ไม่เก็บเลขบัตรเต็มเด็ดขาด** (PCI DSS) — `SalePayment.reference` ที่เป็นตัวเลข 13–19 หลัก (ตัด ช่องว่าง / `-`) และผ่าน Luhn → 400; เก็บได้แค่เลขอนุมัติ / 4 หลักท้าย
@@ -153,8 +155,11 @@ scripts/db-apply.sh              รันด้วยมือ: `roles.sql` (�
 api รันได้หลาย instance หลัง load balancer โดยไม่ต้อง sticky session — **ไม่มี state ใน memory / disk ของ instance**; state ทั้งหมดอยู่ใน PostgreSQL
 - **auth**: JWT ตรวจได้ทุก instance (`JWT_SECRET` เดียวกัน, header `kid` เพื่อหมุน secret ได้: ตรวจได้ทั้งตัวเก่า / ใหม่ช่วงเปลี่ยน); สิทธิ์ / บริษัทอ่านจาก DB ทุก request (ไม่ cache ใน instance)
 - **ตัวนับ login ผิด, เลขเอกสาร, บิลพัก, ล็อก POS** อยู่ใน DB (ไม่ใช่ memory) — instance ไหนรับ request ก็เห็นค่าเดียวกัน
-- **job ตามเวลา** (`@Scheduled` billing / ระงับ / purge): ทุก instance ตื่นพร้อมกัน → ทำงานจริงตัวเดียวด้วย `pg_try_advisory_xact_lock(<job id>)`
-  + กันซ้ำชั้นที่สองด้วย unique (บริษัท, รอบบิล) — ตรวจตอน login / `me` ก็ใช้กติกาเดียวกัน
+- **job ตามเวลา** (`@Scheduled(cron, zone = "Asia/Bangkok")`, รายวัน): ออกใบแจ้งหนี้ที่ถึง `nextInvoiceOn`, ระงับบริษัทที่ค้างเกินผ่อนผัน, ล้าง token ตั้งรหัสผ่าน / ตัวนับ login ผิดที่หมดอายุ
+  — **purge ไม่ใช่ job** (platform admin สั่งเองที่ `POST /platform/companies/:id/purge`)
+  - ชั้น 1: ทุก instance ตื่นพร้อมกัน → ทำงานจริงตัวเดียวด้วย `pg_try_advisory_xact_lock(<เลขประจำ job>)` (ไม่ได้ = ออกทันที; ปล่อยเองตอนจบ transaction / instance ตาย)
+  - ชั้น 2: unique `(company_id, period_start)` + `INSERT … ON CONFLICT DO NOTHING` → ออกใบซ้ำไม่ได้ (รันซ้ำได้ผลเดิม); เลข `SUB-` ออกเมื่อ insert สำเร็จเท่านั้น
+  - `POST /auth/login` / `GET /me` เรียก `catchUp(บริษัทนั้น)` ฟังก์ชันเดียวกับ job (ไม่ใช้ lock รวม — พึ่งชั้น 2) → ถึงรอบก่อน job รันก็ถูกต้อง; endpoint อื่นไม่ตรวจ billing
 - **Flyway ตอน start หลาย instance พร้อมกัน**: Flyway ล็อก `flyway_schema_history` เอง (รอกัน ไม่รันซ้ำ); production แนะนำ "ทางที่ 2" (รัน migrate ครั้งเดียวก่อน deploy, แอป `FLYWAY_MIGRATE=false`)
 - **ไฟล์**: ไม่เขียนไฟล์ลง disk ของ instance — export บริษัทตอบเป็น stream ตรง; ถ้าทำเป็น job + ลิงก์ดาวน์โหลดภายหลัง ไฟล์ต้องอยู่ที่ storage กลาง (DB / object storage)
 - **connection**: แอปต่อผ่าน PgBouncer เสมอ (หัวข้อ "PgBouncer") — pool ของ instance (Hikari `DB_POOL_SIZE`) ต่อ PgBouncer, PgBouncer คุมจำนวน connection จริงเข้า PostgreSQL (`default_pool_size` × user ≤ `max_connections`)
@@ -196,7 +201,8 @@ api รันได้หลาย instance หลัง load balancer โดย
 - `db/README.md`, `db/roles.sql`, `scripts/db-apply.sh` (ทดสอบ: DB ว่าง → `--roles --seed` ผ่าน, รันซ้ำไม่ทำอะไร)
 - `compose.yaml`: `postgres:18` + `pgbouncer` (transaction pooling, แอปต่อ port ของ pgbouncer) + `docker/initdb.sh` → `db/roles.sql` สร้าง database + role 3 ตัว (รหัสจาก `.env`); `.env.example` (ไม่มีค่าจริง), `.gitignore`
 - config `FLYWAY_MIGRATE` (`true` = migrate ตอน start, `false` = validate อย่างเดียว)
-- `PiiCipher` (เข้ารหัส / ถอด / HMAC, หลาย version) + test: ถอดกลับได้, nonce ไม่ซ้ำ, แก้ byte เดียว → ถอดไม่ได้, กุญแจเก่ายังอ่านได้
+- `PiiCipher` (เข้ารหัส / ถอด / HMAC, หลาย version) + test: ถอดกลับได้, ค่าเดิม 2 ครั้งได้ byte ต่างกัน, แก้ byte เดียว → ถอดไม่ได้, AAD คนละ tenant → ถอดไม่ได้,
+  กุญแจเก่ายังอ่านได้หลังเพิ่ม version ใหม่, hash ของ `1-2345-67890-12-3` = `1234567890123` และต่างกันเมื่อ tenant ต่าง, ไม่ตั้ง env → ไม่ start (ข้อความไม่มีค่ากุญแจ)
 - `application.yml`: context path `/api`, port 8080, Jackson ไม่ละ null + ISO-8601, `TZ` ของกฎ = Asia/Bangkok, health `GET /api/healthz` (liveness) + `GET /api/readyz` (ping DB), `server.shutdown=graceful`, log JSON → stdout + request id
 - `ApiException` + `ErrorHandler` (`{ message }`, 404 ทั่วไป, 400 JSON อ่านไม่ได้, 500 ไม่เปิดเผยรายละเอียด)
 - test support: Postgres + PgBouncer container (network เดียวกัน, singleton) — Flyway migrate (รวม seed) ตรงเข้า postgres, DataSource ของแอปผ่าน pgbouncer + MockMvc
@@ -278,7 +284,8 @@ api รันได้หลาย instance หลัง load balancer โดย
 
 ### ขั้น 11 — ส่วน SaaS ของบริษัท
 - `GET /audit-log` (`AuditRules.filterAuditEvents`, `parseAuditQuery`), `GET /company/onboarding`, `GET /company/subscription`, `PUT /company/plan`
-- billing: job รายวัน (`@Scheduled` + advisory lock — ทำงานตัวเดียวแม้หลาย instance) ออกใบแจ้งหนี้ `SUB-YYYYMM-NNNN` + ระงับเมื่อพ้นผ่อนผัน — และตรวจตอน login / `me` ด้วย (contract ให้มีผลทุก request); `actorKind: 'system'`
+- billing: job รายวัน + `catchUp()` ตอน login / `me` (หัวข้อ "Stateless / scale") ออกใบแจ้งหนี้ `SUB-YYYYMM-NNNN` + ระงับเมื่อพ้นผ่อนผัน; `actorKind: 'system'`
+  — test: job 2 ตัวพร้อมกันออกใบเดียว, login ก่อน job ได้ใบแล้ว job ไม่ออกซ้ำ
 - `POST /auth/signup` (ใช้ role platform สร้างบริษัท; audit `signup`), `POST /auth/forgot-password` (ตอบข้อความเดียวเสมอ, token เก็บ hash, ลิงก์จาก `APP_BASE_URL` ไม่ใช่ `Host`), `POST /auth/reset-password` (audit `password_reset`)
 - `GET /company/export` (ไม่มีรหัสผ่าน / token; ข้อมูลผู้ซื้อถอดรหัสแล้ว), `GET|POST|DELETE /company/deletion`; ระหว่างรอลบ: เฉพาะ owner, endpoint อื่น → 403
 - test: billing ตาม `subscription.model.spec.ts` ด้วย `Clock` ปลอม, ลิงก์ไม่ใช้ header `Host`
