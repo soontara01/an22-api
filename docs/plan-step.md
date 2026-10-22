@@ -1,6 +1,6 @@
 # แผนทำ an22-api (C2) — ทีละขั้นย่อย
 
-สถานะ: ขั้น 0 เสร็จ 2026-10-21 — รอผู้ใช้ก่อนเริ่มขั้น 1
+สถานะ: ขั้น 1 เสร็จ 2026-10-22 — รอผู้ใช้ก่อนเริ่มขั้น 2
 
 ## บริบท
 
@@ -267,9 +267,18 @@ api รันได้หลาย instance หลัง load balancer โดย
 - ผล: `./mvnw verify` ผ่าน 41 test (unit 21 + integration 20: PiiCipher, ApiProperties, RequestLogFilter, roles.sql ด้วย admin จำลอง Azure, ผ่าน PgBouncer, prepared statement ซ้ำ 30 รอบ,
   read-only ไม่ค้าง, `FLYWAY_MIGRATE=false`, error format, access log JSON); dev: compose + `spring-boot:run` → healthz / readyz / 401 ตรง, `DB_URL` = `DB_MIGRATE_URL` → ไม่ start
 
-### ขั้น 1 — schema ฐาน + RLS + seed บริษัท / ผู้ใช้
+### ขั้น 1 — schema ฐาน + RLS + seed บริษัท / ผู้ใช้ ✅ เสร็จ 2026-10-22
 - migration `db/migration/V1__base.sql`: grant ให้ role (`flyway_schema_history` ได้จาก `afterMigrate.sql` แล้ว), ตาราง platform (`companies`, `platform_admins`, `billing_invoices`, `password_reset_tokens`), `company_info`, `branches`, `users` (+ `user_branches`, partial unique owner), `menu_access`, `audit_log` (insert-only), `doc_counters`
 - seed (`db/seed/V1_1__seed_demo.sql`): DEMO, HQ (`00000`) + BN, `admin` / `admin` (owner ตาม `fillOwner()`), `somchai` / `1234`, ผู้ใช้อื่นใน `SEED_USERS`, `company_info` จาก `SEED_STORE_INFO`, menu access ค่าเริ่ม, platform `platform` / `platform` — รหัสผ่านเป็น BCrypt
+- ผลที่ต่างจาก / เพิ่มจากข้างบน (ทำแล้ว):
+  - เพิ่ม `dt_platform_doc_counters` ใน V1 ด้วย (ตัวนับ `SUB-` — หัวข้อ "เลขเอกสาร")
+  - policy ใช้ function `app_tenant_id()` = `nullif(current_setting('app.tenant_id', true), '')::bigint` — ค่าว่าง (ตัวแปรเคยถูกตั้งใน session) ต้องไม่ error แต่ได้ 0 แถว
+  - `set_row_stamp()`: actor `system` (seed / import / job) ใส่ `created_at` เองได้ (seed ใช้ `User.createdAt` ของ mock); `user` / `platform` ได้ `now()` เสมอ — ตาราง append-only ใช้ `set_row_stamp('append_only')`
+  - `User.createdAt` = `dt_users.created_at`, `AuditEvent.at` = `dt_audit_log.created_at` (ไม่มีคอลัมน์ซ้ำ); `audit_log.branch_id` มี FK (สาขาไม่ถูกลบ), `terminal_id` / `user_id` / ref ไม่มี
+  - an22_app: DML บนตารางบริษัท, `dt_audit_log` INSERT + SELECT, `dt_doc_counters` ไม่มี DELETE, ตาราง platform อ่านได้แค่ `dt_companies` (+ `flyway_schema_history`) — ใบแจ้งหนี้ / token / platform admin ใช้ `platformTx` เท่านั้น
+  - seed: admin เป็น owner ตั้งแต่ seed (ไม่ต้อง `fillOwner()`), รหัสผ่านของผู้ใช้อื่นทั้งหมด `1234` ตาม mock, BCrypt cost 10
+  - `SchemaConventionsIT` ตรวจกติกา schema กับ DB จริงทุกครั้ง (ชื่อ `dt_`, owner, created_* / updated_* + trigger, RLS ENABLE + FORCE + policy, FK RESTRICT + รวม tenant + มี index, grant ของ an22_app) — migration ใหม่ที่ผิดกติกา test แดงเอง
+  - test ใช้ `support/TenantSql` (ตั้ง app.* แบบ SET LOCAL เหมือน TenantTransactionManager ขั้น 2) + `support/TenantB` (บริษัทที่ 2)
 - test: migrate บน DB ว่าง (ทั้งผ่านแอปและ `scripts/db-apply.sh`); RLS — ตั้ง tenant 1 ไม่เห็นแถวของ tenant 2 / ไม่ตั้ง = 0 แถว / INSERT ด้วย tenant อื่นถูกปฏิเสธ; `an22_app` UPDATE / DELETE `audit_log` ไม่ได้; `an22_app` ไม่มี BYPASSRLS และไม่ใช่ owner; unique รวม tenant (username ซ้ำได้ข้ามบริษัท); FK รวม tenant — `user_branches` อ้างสาขาของบริษัทอื่นไม่ได้; trigger ตั้ง `created_*` / `updated_*` ถูก (insert / update คนละผู้ใช้, แก้ `created_*` ทับไม่ได้)
 
 ### ขั้น 2 — auth / tenant / branch (แกนของทุก request)

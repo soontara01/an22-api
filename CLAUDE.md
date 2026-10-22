@@ -53,7 +53,9 @@ src/main/java/com/an22/api/
   rules/         (ขั้นถัดไป) กฎที่ port จาก core/models — pure Java ไม่ผูก Spring, 1 class ต่อ 1 ไฟล์ TS
   <feature>/     XxxController → XxxService → XxxDao
 src/test/java/com/an22/api/
-  support/       TestDatabase (singleton container), ApiTest (base: @SpringBootTest + MockMvc, get/post/delete ใส่ /api ให้), ProbeController (endpoint ของ test), RolesSqlIT
+  support/       TestDatabase (singleton container), ApiTest (base: @SpringBootTest + MockMvc, get/post/delete ใส่ /api ให้), ProbeController (endpoint ของ test), RolesSqlIT,
+                 TenantSql (รัน SQL เป็น an22_app ในนามบริษัท / ผู้ใช้ — `as` / `rolledBack` / `withoutTenant` / `platform`), TenantB (บริษัทที่ 2 สำหรับ test ข้าม tenant)
+  db/            SchemaConventionsIT, RlsIT, RowStampIT, SeedIT
 ```
 
 ## 3 ชั้น + transaction (บังคับ)
@@ -84,6 +86,9 @@ src/test/java/com/an22/api/
 - เงิน `numeric(14,2)`, เวลา `timestamptz`, วันธุรกิจ `date`, enum = `text` + `CHECK`; ห้ามลบเอกสาร
 - role: `an22_owner` (เจ้าของ, Flyway), `an22_app` (ร้าน, ใต้ RLS, `audit_log` insert + select), `an22_platform` (BYPASSRLS) — `db/roles.sql` รันด้วย admin ที่**ไม่ใช่ superuser** ได้ (Azure); ห้ามใช้คำสั่งที่ต้อง superuser ใน migration / roles.sql
 - extension ใหม่ → ต้องเปิดใน `azure.extensions` ของ Azure ก่อน (เขียนใน `db/README.md`)
+- policy ใช้ `app_tenant_id()` (ค่าว่าง → null → 0 แถว, ไม่ error); ตารางใหม่ copy รูปแบบจาก `V1__base.sql` (คอลัมน์ stamp, trigger, RLS, grant)
+  — `SchemaConventionsIT` ตรวจกติกาทั้งหมดนี้กับ DB จริง: ผิดกติกา test แดง (ตาราง platform ที่ an22_app แตะได้ต้องเพิ่มใน `APP_PLATFORM_GRANTS` อย่างตั้งใจ)
+- an22_app อ่านตาราง platform ได้แค่ `dt_companies` — ใบแจ้งหนี้ / reset token / platform admin ใช้ `platformTx`
 - seed (`db/seed`, version แทรกหลัง migration ที่ใช้) = `seedDb()` ของ mock: DEMO, HQ + BN, `admin`/`admin`, `somchai`/`1234`, platform `platform`/`platform` — dev / test เท่านั้น (profile `dev` / `test` เพิ่ม location)
 
 ## Config (env — ครบใน `.env.example`)
