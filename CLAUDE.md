@@ -27,7 +27,17 @@ docker compose up -d               # dev DB: postgres (5432) + pgbouncer (6432) 
 curl -s localhost:8080/api/healthz # {"status":"ok"}; /api/readyz ping DB
 docker compose down -v             # รีเซ็ต DB local
 scripts/db-apply.sh [--roles] [--seed]   # รัน script DB ด้วยมือ (ทางที่ 2 / DBA) — db/README.md
+docker build -t an22-api:$(git rev-parse --short HEAD) .   # image production
+docker compose --profile api up -d --build                  # ลอง image กับ dev DB (port 8080; ไม่มี seed ใน image)
 ```
+
+## Container (production)
+
+`Dockerfile` 2 stage: build ด้วย `eclipse-temurin:25.0.4.1_1-jdk-noble` (`-DskipTests` — test อยู่ที่ `./mvnw verify`) → runtime `…-jre-noble`, layer ของ Boot (`jarmode=tools extract`)
+- user `an22` (uid 10001) ไม่ใช่ root; `java` เป็น PID 1 (exec form) → SIGTERM = graceful shutdown (รอ request ≤ 30 วิ — ตั้ง grace period ของ platform ≥ 40 วิ)
+- image มีแค่ `db/migration` (ไม่มี `db/seed`, `.env`, test) — `.dockerignore` แบบ allowlist; ค่าทั้งหมดจาก env ตอนรัน
+- ไม่มี `HEALTHCHECK` (ไม่มี curl ใน image) — ตั้ง probe ที่ platform: liveness `GET /api/healthz`, readiness `GET /api/readyz`
+- `JAVA_TOOL_OPTIONS` = `-XX:MaxRAMPercentage=75 -XX:+ExitOnOutOfMemoryError` + timezone
 
 ## โครง
 
@@ -92,7 +102,9 @@ src/test/java/com/an22/api/
 
 ## JSON / error
 
-- context path `/api` (path ใน spec ไม่รวม `/api`), port 8080; JSON ไม่ละ `null` (`default-property-inclusion: always`), เวลา ISO-8601 (`Instant` → `…Z`), วันธุรกิจคิดด้วย `Clock` (Asia/Bangkok) — JVM เป็น UTC
+- context path `/api` (path ใน spec ไม่รวม `/api`), port 8080; JSON ไม่ละ `null` (`default-property-inclusion: always`), เวลา ISO-8601 (`Instant` → `…Z`)
+- เวลาท้องถิ่น Asia/Bangkok ทั้ง container + JVM (`Application.main`, `Dockerfile`, test) → log +07:00, session DB `TimeZone = Asia/Bangkok`;
+  **กฎ / วันธุรกิจยังต้องใช้ `Clock` ที่ inject เสมอ** (test แทนด้วย Clock ปลอม) — ห้าม `LocalDate.now()` / `Instant.now()` ตรง ๆ
 - error ทุกตัว `{ "message": "<ไทย>" }` ข้อความตามกฎ / mock ทุกตัวอักษร: `throw new ApiException(status, msg)` (หรือ `ApiException.badRequest/forbidden/notFound`)
 - ข้อความกลาง (`ErrorResponse`): 404 / 405 `ไม่มี endpoint <METHOD> <path>`, 400 `ข้อมูลที่ส่งมาไม่ถูกต้อง`, 500 `ระบบขัดข้อง กรุณาลองใหม่` (ไม่มีรายละเอียด), 401 `เซสชันหมดอายุ กรุณาเข้าสู่ระบบใหม่`
 

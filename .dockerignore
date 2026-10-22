@@ -1,0 +1,7 @@
+# เข้า build context เฉพาะที่ Dockerfile ใช้ — ห้ามมี .env / ความลับ
+*
+!.mvn/
+!mvnw
+!pom.xml
+!src/main/
+!db/migration/

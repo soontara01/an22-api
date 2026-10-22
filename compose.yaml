@@ -42,5 +42,22 @@ services:
       db:
         condition: service_healthy
 
+  # image ของ api (Dockerfile) — `docker compose --profile api up -d --build` → http://localhost:8080/api/healthz
+  # ไม่มี seed (image ไม่มี db/seed) ต้องสั่ง seed ก่อนด้วย ./mvnw spring-boot:run (profile dev) หรือ scripts/db-apply.sh --seed
+  api:
+    profiles: [api]
+    build: .
+    image: an22-api:local
+    env_file: .env
+    environment:
+      DB_URL: jdbc:postgresql://pgbouncer:6432/${DB_NAME:-an22}
+      DB_MIGRATE_URL: jdbc:postgresql://db:5432/${DB_NAME:-an22}
+    ports:
+      - "127.0.0.1:${API_PORT:-8080}:8080"
+    depends_on:
+      pgbouncer:
+        condition: service_started
+    stop_grace_period: 40s
+
 volumes:
   db-data:

@@ -30,6 +30,7 @@
 ```
 pom.xml, mvnw, .mvn/          compose.yaml (postgres + pgbouncer)   .env.example   CLAUDE.md   docs/plan-step.md
 db/                           script DB ทั้งหมด (หัวข้อ "script DB")   scripts/db-apply.sh
+Dockerfile, .dockerignore      image ของ api (ขั้น 0 — ผู้ใช้ขอ 2026-10-22: prod รันเป็น container)
 docker/                       initdb.sh (สร้าง admin จำลอง Azure → roles.sql), pgbouncer/ (pgbouncer.ini + start.sh) — ใช้ทั้ง compose และ Testcontainers
 src/main/java/com/an22/api/
   Application.java
@@ -172,7 +173,8 @@ api รันได้หลาย instance หลัง load balancer โดย
 - **connection**: แอปต่อผ่าน PgBouncer เสมอ (หัวข้อ "PgBouncer") — pool ของ instance (Hikari `DB_POOL_SIZE`) ต่อ PgBouncer, PgBouncer คุมจำนวน connection จริงเข้า PostgreSQL (`default_pool_size` × user ≤ `max_connections`)
 - **ปิดเครื่องนุ่มนวล**: `server.shutdown=graceful` (รอ request ที่ค้างให้จบ) + health แยก `GET /api/healthz` (liveness, ไม่แตะ DB) / `GET /api/readyz` (readiness, ping DB) ให้ load balancer
 - **log** เป็น JSON ไป stdout (ไม่เขียนไฟล์), มี request id (รับ `X-Request-Id` จาก web ถ้ารูปแบบถูก ไม่งั้นสุ่ม) ไว้ตามข้าม instance — รายละเอียดหัวข้อ "Log ต่อ request"
-- **เวลา**: instance ใช้ UTC, วันธุรกิจคิดด้วย `Clock` Asia/Bangkok ในโค้ด (ไม่พึ่ง timezone ของเครื่อง)
+- **เวลา** (เปลี่ยน 2026-10-22 ตามผู้ใช้ — เดิม instance ใช้ UTC): container + JVM ใช้เวลาท้องถิ่น **Asia/Bangkok** (`Dockerfile` `TZ`, `Application.main` ตั้ง default เอง ไม่พึ่งเครื่อง)
+  → log เป็น +07:00, session DB ได้ `TimeZone = Asia/Bangkok` (pgJDBC ส่งตาม JVM) — กฎ / วันธุรกิจยังคิดด้วย `Clock` ในโค้ดเสมอ, JSON เวลาเป็น `Instant` (`…Z`) เหมือนเดิม; test รันด้วย Asia/Bangkok
 
 ### PgBouncer (บังคับ — ตกลงแล้ว 2026-10-21)
 - `pool_mode = transaction`; แอป (role `an22_app` / `an22_platform`) ต่อผ่าน PgBouncer เท่านั้น; `an22_owner` (Flyway) ต่อ PostgreSQL ตรง
@@ -261,6 +263,7 @@ api รันได้หลาย instance หลัง load balancer โดย
 - `DB_URL` (ผ่าน pgbouncer) / `DB_MIGRATE_URL` (ตรง) แยกกัน
 - `CLAUDE.md` ฉบับแรก (ตามหัวข้อ "สิ่งที่ CLAUDE.md ของแต่ละ repo ควรมี" ใน README: เวอร์ชัน, โครง package, คำสั่ง build / test / รัน / รีเซ็ต DB, กติกา schema, RLS, seed, ความปลอดภัย E49, JWT, การ port กฎ + fixtures, JSON)
 - test: context ขึ้นได้, `/api/healthz`, error format
+- (เพิ่ม 2026-10-22) `Dockerfile` + `.dockerignore` + compose profile `api`; เวลาท้องถิ่น Asia/Bangkok ทั้ง container / JVM (หัวข้อ "Stateless / scale" ข้อ เวลา)
 - ผล: `./mvnw verify` ผ่าน 41 test (unit 21 + integration 20: PiiCipher, ApiProperties, RequestLogFilter, roles.sql ด้วย admin จำลอง Azure, ผ่าน PgBouncer, prepared statement ซ้ำ 30 รอบ,
   read-only ไม่ค้าง, `FLYWAY_MIGRATE=false`, error format, access log JSON); dev: compose + `spring-boot:run` → healthz / readyz / 401 ตรง, `DB_URL` = `DB_MIGRATE_URL` → ไม่ start
 
@@ -354,7 +357,7 @@ api รันได้หลาย instance หลัง load balancer โดย
 ### ขั้น 13 — ปิดงาน / พร้อม C3
 - test กวาดข้าม tenant ทุก endpoint (ตาราง endpoint → อ่าน / เขียน id ของบริษัท B ด้วย token A → 404)
 - **test หลาย instance**: compose เปิด api 2 ตัวหลัง load balancer ง่าย ๆ → login ตัวหนึ่ง ใช้ token กับอีกตัว, ขายพร้อมกันจาก 2 ตัวเลขบิลไม่ซ้ำ, job billing ทำงานครั้งเดียว
-- `Dockerfile` (image ของ api) + `compose.yaml` profile รวม postgres + api (+ an22-web จาก image ของมัน — ไม่แก้ repo web)
+- ~~`Dockerfile` (image ของ api) + `compose.yaml` profile รวม postgres + api~~ ทำแล้วในขั้น 0 (2026-10-22) — เหลือ: an22-web จาก image ของมันในตัว compose (ไม่แก้ repo web)
 - ทดลองกับหน้าบ้านจริง: build หน้าบ้านด้วย `useMock: false` ชั่วคราว (ไม่ commit ในหน้าบ้าน) ผ่าน an22-web → login DEMO, ขาย, ปิดกะ
 - อัปเดต `../FrontEnd-An22/docs/backend/README.md` หัวข้อ api ("ทำแล้ว C2 …") + `next-steps-plan.md` — บอกผู้ใช้ก่อน
 - C3 (สลับหน้าบ้านถาวร) เป็นงานแยก ไม่อยู่ในแผนนี้

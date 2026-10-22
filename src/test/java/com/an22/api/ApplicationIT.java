@@ -70,6 +70,12 @@ class ApplicationIT extends ApiTest {
         .isEqualTo("off");
   }
 
+  /** session DB ได้ TimeZone ของ JVM (Asia/Bangkok) ผ่าน PgBouncer — now()::date / current_date ใน SQL = วันไทย. */
+  @Test
+  void databaseSessionUsesBangkokTime() {
+    assertThat(inTx(appTx, () -> appJdbc.sql("SHOW TimeZone").query(String.class).single())).isEqualTo("Asia/Bangkok");
+  }
+
   /** pgJDBC เปลี่ยนเป็น server-side prepared statement หลังรันซ้ำ 5 ครั้ง — ต้องผ่าน PgBouncer ได้ข้ามหลาย transaction. */
   @Test
   void repeatedPreparedStatementsWorkThroughTransactionPooling() {
