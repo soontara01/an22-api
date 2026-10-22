@@ -30,12 +30,13 @@ public class PlanLimits {
     }
   }
 
-  /** {@code planUsage()}: นับเฉพาะที่ใช้งาน — เครื่อง POS นับเมื่อมีตาราง (ขั้น 4). */
+  /** {@code planUsage()}: นับเฉพาะที่ใช้งาน. */
   public PlanRules.Usage usage() {
     return jdbc.sql(
             "SELECT (SELECT count(*) FROM dt_branches WHERE active) AS branches,"
-                + " (SELECT count(*) FROM dt_users WHERE active) AS users")
-        .query((rs, i) -> new PlanRules.Usage(rs.getInt("branches"), rs.getInt("users"), 0))
+                + " (SELECT count(*) FROM dt_users WHERE active) AS users,"
+                + " (SELECT count(*) FROM dt_pos_terminals WHERE active) AS terminals")
+        .query((rs, i) -> new PlanRules.Usage(rs.getInt("branches"), rs.getInt("users"), rs.getInt("terminals")))
         .single();
   }
 }

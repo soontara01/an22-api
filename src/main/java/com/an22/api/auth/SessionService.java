@@ -33,7 +33,7 @@ public class SessionService {
    * (ยกเว้นรอลบ: เฉพาะ owner), ผู้ใช้ไม่มี / ปิดใช้งาน. TxActor ของ request ตั้งบริษัทไว้แล้ว (RLS).
    */
   @Transactional(readOnly = true)
-  public Optional<ShopSession> load(long tenantId, long userId) {
+  public Optional<ShopSession> load(long tenantId, long userId, Long terminalHeader) {
     Optional<CompanyRow> company = dao.company(Via.APP, tenantId);
     if (company.isEmpty()) {
       return Optional.empty();
@@ -47,7 +47,12 @@ public class SessionService {
     if (user.isEmpty() || !user.get().active() || (deleting && !UserRules.isOwner(user.get().role()))) {
       return Optional.empty();
     }
-    return Optional.of(of(c, user.get(), dao.branches(Via.APP, tenantId)));
+    Integer terminal =
+        terminalHeader != null && terminalHeader <= Integer.MAX_VALUE
+                && dao.terminalExists(Via.APP, tenantId, terminalHeader.intValue())
+            ? terminalHeader.intValue()
+            : null;
+    return Optional.of(of(c, user.get(), dao.branches(Via.APP, tenantId), terminal));
   }
 
   /** {@code GET /me}: session ปัจจุบัน (ไม่ออก token ใหม่) + แถบแจ้งเตือนการเก็บเงินของ owner / admin. */
@@ -57,10 +62,10 @@ public class SessionService {
   }
 
   /** ประกอบ session จากแถวที่อ่านแล้ว ({@code companySession()} ของ mock). */
-  static ShopSession of(CompanyRow c, User user, List<Branch> allBranches) {
+  static ShopSession of(CompanyRow c, User user, List<Branch> allBranches, Integer terminalId) {
     return new ShopSession(
         c.id(), c.code(), c.active(), c.suspendedReason(), c.planId(), c.purgeAfter(), c.subscription(), c.name(), c.taxId(),
-        c.staffSeeCost(), user, allBranches.stream().filter(b -> UserRules.canWorkIn(user, b)).toList());
+        c.staffSeeCost(), user, allBranches.stream().filter(b -> UserRules.canWorkIn(user, b)).toList(), terminalId);
   }
 
   /** แถบแจ้งเตือน (E35) เฉพาะ owner / admin — คนอื่น null. */

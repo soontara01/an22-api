@@ -19,8 +19,9 @@ public class Audit {
    */
   public void record(
       ShopSession s, String action, Long branchId, String refKind, Long refId, String refLabel, String detail) {
-    // terminalId: ขั้น 4 (ตรวจว่าเป็นเครื่องของบริษัท) — ตอนนี้ null
+    // เครื่องของบริษัทนี้เท่านั้น (ShopSessionFilter ตรวจแล้ว) — เครื่องที่ตั้งไว้ให้บริษัทอื่นยังส่งเลขมาได้
+    Long terminal = s.terminalId() == null ? null : s.terminalId().longValue();
     dao.insert(new AuditEntry(
-        s.tenantId(), "user", s.user().id(), s.user().name(), branchId, null, action, refKind, refId, refLabel, detail));
+        s.tenantId(), "user", s.user().id(), s.user().name(), branchId, terminal, action, refKind, refId, refLabel, detail));
   }
 }

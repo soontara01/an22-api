@@ -53,11 +53,14 @@ src/main/java/com/an22/api/
   web/           ApiException, ErrorResponse (ข้อความกลาง), ErrorHandler, FallbackErrorController (/error), RequestLogFilter,
                  ClientIp (X-Real-IP), BranchContext, TerminalContext, RequestContextResolvers
   model/         record ของ JSON = interface TS (User, Branch, Company, Session, LoginResponse, BillingInvoice …)
-  rules/         กฎที่ port จาก core/models — pure Java ไม่ผูก Spring, 1 class ต่อ 1 ไฟล์ TS (UserRules, CompanyRules, CostVisibility, SubscriptionRules)
+  rules/         กฎที่ port จาก core/models — pure Java ไม่ผูก Spring, 1 class ต่อ 1 ไฟล์ TS (UserRules, CompanyRules, StoreInfoRules, MenuAccessRules,
+                 PlanRules, CostVisibility, SubscriptionRules, CategoryRules, Suppliers, PaymentMethodRules, PosTerminalRules, Money)
   health/        /healthz, /readyz
   auth/          login / verify / me (AuthController → AuthService / SessionService → SessionDao), LoginThrottle (+ Dao), ShopSession, PasswordResetTokens
   platform/      /platform/auth/login, /platform/me
   branch/        /branches
+  masterdata/    /categories, /suppliers, /payment-methods (+ order)
+  pos/           /pos-terminals (ขั้น 8: กะ / ล็อก / บิลพัก)
   company/       /settings/* (SettingsController → SettingsService → CompanyInfoDao / MenuAccessDao), /company/owner, PlanLimits
   user/          /users (+ password); UserDao.SELECT / row ใช้ร่วมกับ SessionDao
   audit/         Audit (บันทึกเหตุการณ์ของผู้ใช้ร้านใน transaction ของ service), AuditDao, AuditEntry
@@ -157,7 +160,8 @@ JSON 1 บรรทัดต่อ event ไป stdout (Spring Boot structured l
 
 ## การ port กฎ + fixtures (ขั้น 7 เป็นต้นไป)
 
-กฎ `xxxError()` ใน `../FrontEnd-An22/src/app/core/models/*.model.ts` → class ใน `rules/` ผลตรงทุกตัวเลข / ข้อความ; เงินใช้ `double` + `round2` แบบ JS (`Math.floor(x * 100 + 0.5) / 100`)
+กฎ `xxxError()` ใน `../FrontEnd-An22/src/app/core/models/*.model.ts` → class ใน `rules/` ผลตรงทุกตัวเลข / ข้อความ; เงินใช้ `double` + `Money.round2()` แบบ JS
+(`Math.round(n * 100) / 100` — Java `Math.round(double)` ปัดแบบเดียวกัน; ตรวจค่าที่สงสัยกับ `node -e` ได้)
 แปลงเป็น `BigDecimal` scale 2 ตอนเก็บ; test ตาม `*.model.spec.ts` + `FixturesTest` อ่าน `../FrontEnd-An22/docs/backend/fixtures/*.json` (ทับได้ด้วย `-Dfixtures.dir=…`)
 
 ## Test

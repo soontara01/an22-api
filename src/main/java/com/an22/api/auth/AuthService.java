@@ -101,7 +101,7 @@ public class AuthService {
     throttle.succeed(account);
     actors.becomeOnPlatform(TxActor.user(c.id(), u.id()));
     audit.insertOnPlatform(AuditEntry.ofUser(c.id(), u.id(), u.name(), null, "login", ""));
-    ShopSession session = SessionService.of(c, u, dao.branches(Via.PLATFORM, c.id()));
+    ShopSession session = SessionService.of(c, u, dao.branches(Via.PLATFORM, c.id()), null);
     String token = jwt.issueShop(c.id(), u.id(), u.role(), u.allBranches(), u.branchIds());
     return new LoginResponse(token, SessionService.toSession(session, sessions.billing(session, Via.PLATFORM)));
   }

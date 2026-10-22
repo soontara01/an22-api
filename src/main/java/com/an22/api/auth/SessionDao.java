@@ -96,6 +96,15 @@ public class SessionDao {
         .list();
   }
 
+  /** เครื่อง POS เลขนี้เป็นของบริษัทไหม (ใช้งานอยู่หรือไม่ก็ได้). */
+  public boolean terminalExists(Via via, long tenantId, int terminalId) {
+    return jdbc(via).sql("SELECT EXISTS (SELECT 1 FROM dt_pos_terminals WHERE tenant_id = :t AND id = :id)")
+        .param("t", tenantId)
+        .param("id", terminalId)
+        .query(Boolean.class)
+        .single();
+  }
+
   public List<BillingInvoice> invoices(Via via, long tenantId) {
     return jdbc(via).sql(
             "SELECT id, company_id, invoice_no, plan_id, period_start, period_end, amount, issued_on, due_date, status, paid_at"

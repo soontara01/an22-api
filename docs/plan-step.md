@@ -1,6 +1,6 @@
 # แผนทำ an22-api (C2) — ทีละขั้นย่อย
 
-สถานะ: ขั้น 3 เสร็จ 2026-10-22 — รอผู้ใช้ก่อนเริ่มขั้น 4
+สถานะ: ขั้น 4 เสร็จ 2026-10-22 — รอผู้ใช้ก่อนเริ่มขั้น 5
 
 ## บริบท
 
@@ -325,11 +325,22 @@ api รันได้หลาย instance หลัง load balancer โดย
   - `MenuAccessRules.MENU` ลอกรายการเมนู + ป้ายจาก `core/navigation/menu.config.ts` — หน้าบ้านเพิ่ม / เปลี่ยนเมนูต้องแก้ที่นี่ด้วย
   - JSON: BigDecimal เป็นตัวเลขธรรมดา (`JacksonConfig`), ตัวเลขของ CompanyInfo ไม่มีทศนิยมเกิน (5 ไม่ใช่ 5.00)
 
-### ขั้น 4 — ข้อมูลหลัก
-- migration: `categories`, `suppliers`, `payment_methods`, `pos_terminals`, `sku_prices` (`EXCLUDE USING gist` — ต้องมี extension `btree_gist`), `promotions` (+ สาขา / ของแถม)
-- กฎ: `CategoryRules`, `Suppliers.isValidThaiTaxId`, `PaymentMethodRules`, `PosTerminalRules`, `PriceRules`, `PromotionRules` (+ `promotionBranchScopeError` 403)
-- endpoint: `/categories`, `/suppliers`, `/payment-methods` (+ `order`), `/pos-terminals`, `/prices`, `/promotions`; audit `price_change`, `promotion_change`, `terminal_change`
-- seed: หมวด / ผู้จำหน่าย / ช่องทางชำระ / เครื่อง POS 3 เครื่อง / ราคา / โปร ตาม mock
+### ขั้น 4 — ข้อมูลหลัก (ไม่ขึ้นกับ SKU) ✅ เสร็จ 2026-10-22
+- **แบ่งขั้นใหม่ (ตกลง 2026-10-22)**: ราคา + โปรโมชั่นต้องอ้าง SKU (ตาราง products มาในขั้น 5) → ย้ายไป **ขั้น 5b**;
+  ในขั้นนี้ `Category.productCount` / `Supplier.productCount` = 0 และยังไม่ตรวจ "มี SKU อ้าง → ลบไม่ได้" (เติมในขั้น 5)
+- migration: `categories`, `suppliers`, `payment_methods`, `pos_terminals`
+- กฎ: `CategoryRules`, `Suppliers`, `PaymentMethodRules`, `PosTerminalRules`, `Money.moneyInputError` (ที่ช่องทางชำระใช้)
+- endpoint: `/categories`, `/suppliers`, `/payment-methods` (+ `order`), `/pos-terminals`; audit `terminal_change`
+- เครื่อง POS: เพดานแพ็กเกจนับเครื่องที่ใช้งาน (เดิมนับ 0), audit `terminalId` = `X-Terminal-Id` เมื่อเป็นเครื่องของบริษัท
+- seed: หมวด / ผู้จำหน่าย / ช่องทางชำระ / เครื่อง POS 3 เครื่อง ตาม mock
+- ผลที่ทำ (รายละเอียดที่แผนไม่ได้ระบุ):
+  - package `masterdata/` (หมวด / ผู้จำหน่าย / ช่องทางชำระ — `MasterDataController` → `MasterDataService` → Dao ต่อตาราง), `pos/` (เครื่อง POS)
+  - PUT ตาม mock: หมวดแก้ได้แค่ code / name / active, ผู้จำหน่าย / ช่องทางชำระ **แทนทั้งตัว** (field ที่ไม่ส่ง = ค่าเริ่ม), เครื่อง POS ทับเฉพาะที่ส่ง (เลขเครื่องไม่เปลี่ยน)
+  - `dt_pos_terminals` PK `(tenant_id, id)` (เลขเครื่องผู้ใช้กำหนด ไม่ใช่ identity); `close_check` เก็บค่าที่ `closeCheckOf()` คิดแล้วเสมอ (mock ไม่เก็บ = ค่าเริ่มของประเภท)
+  - `ShopSession.terminalId` = `X-Terminal-Id` เมื่อเป็นเครื่องของบริษัท (ตรวจทุก request ใน `SessionService.load`) → audit ใช้ค่านี้; `TerminalContext` ยังเป็นค่าดิบ (POS / กะตรวจด้วย `terminalError()`)
+  - `PaymentMethod` ตอบตัวเลขเป็น double (`300.0`) — JS อ่านเป็นตัวเลขเดียวกัน
+  - **ยังไม่ทำ (รอตารางของขั้นถัดไป)**: productCount ของหมวด / ผู้จำหน่าย + ลบที่มี SKU อ้าง (ขั้น 5), ลบหมวดที่มีโปรอ้าง (5b), ลบช่องทางที่มีการขายอ้าง (9),
+    ปิดเครื่องที่มีกะเปิด (8), ลบเครื่องที่มีกะ / เอกสาร (8–10)
 
 ### ขั้น 5 — SKU / สต็อก
 - **ถามผู้ใช้ก่อน**: ทุนเฉลี่ยเก็บ `numeric(14,2)` (ตรงกับ mock ที่ปัด 2 ตำแหน่ง) หรือ `numeric(14,4)` (`data-model.md` บอกให้ตกลงก่อนทำ)
@@ -348,6 +359,13 @@ api รันได้หลาย instance หลัง load balancer โดย
 - **ซ่อนทุน (E43 / E44)**: `CostHidingAdvice` — ทุก response ของคนที่ `canSeeCost` = false: key ใน `COST_FIELDS` → `null` ทุกระดับ + `{qty, avgCost, value}` → `value: null`; ขาเข้า SKU ไม่ใช้ `cost` / `suppliers[].cost` (คงค่าเดิม / ใหม่ = 0)
 - seed: สินค้า + สต็อกยกมา (`opening`) ของ HQ / BN ตามผลของ `migrateCosting` / `migrateBranchStock` / `syncSerials` ใน mock
 - test: ทุนเฉลี่ยตรงตัวอย่าง spec, สต็อกต่อสาขา, `user` ได้ทุนเป็น null ทุก endpoint ของขั้นนี้, `staffSeeCost` = true แล้วเห็น
+
+### ขั้น 5b — ราคาขาย + โปรโมชั่น (ย้ายจากขั้น 4 — ตกลง 2026-10-22)
+- migration: `sku_prices` (`EXCLUDE USING gist` — ต้องมี extension `btree_gist`; Azure: เปิดใน `azure.extensions` ก่อน), `promotions` (+ สาขา / ของแถม)
+- กฎ: `PriceRules`, `PromotionRules` (+ `promotionBranchScopeError` 403)
+- endpoint: `/prices`, `/promotions`; audit `price_change`, `promotion_change`; `Product.currentPrice` จากราคา
+- เติม: ลบหมวดที่มีโปรอ้างไม่ได้ / ลบ SKU ที่อยู่ในโปรที่ยังไม่หมดอายุไม่ได้
+- seed: ราคา / โปร ตาม mock
 
 ### ขั้น 6 — ใบโอนสินค้า
 - migration: `transfers`, `transfer_lines`; กฎ `TransferRules`; endpoint `/transfers` (+ `receive`, `cancel`), เลข `TR-…`; audit `transfer_cancel`

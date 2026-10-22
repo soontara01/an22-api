@@ -71,7 +71,8 @@ public class ShopSessionFilter extends OncePerRequestFilter {
         throw unauthenticated(verify);
       }
       TxActor.set(TxActor.user(tenantId, userId));
-      Optional<ShopSession> loaded = sessions.load(tenantId, userId);
+      TerminalContext terminal = TerminalContext.parse(request.getHeader("X-Terminal-Id"));
+      Optional<ShopSession> loaded = sessions.load(tenantId, userId, terminal.terminalId());
       if (loaded.isEmpty()) {
         throw unauthenticated(verify);
       }
@@ -92,7 +93,6 @@ public class ShopSessionFilter extends OncePerRequestFilter {
         }
       }
       request.setAttribute(BranchContext.ATTR, branch);
-      TerminalContext terminal = TerminalContext.parse(request.getHeader("X-Terminal-Id"));
       request.setAttribute(TerminalContext.ATTR, terminal);
       request.setAttribute(RequestLogFilter.ATTR_TERMINAL_ID, terminal.terminalId());
     } catch (ApiException e) {

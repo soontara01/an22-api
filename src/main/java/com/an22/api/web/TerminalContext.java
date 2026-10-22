@@ -1,8 +1,8 @@
 package com.an22.api.web;
 
 /**
- * {@code X-Terminal-Id} ของ request (เลขเครื่อง POS — จำนวนเต็ม > 0, อื่น = ไม่มี).
- * ยังไม่ได้ตรวจว่าเป็นเครื่องของบริษัท: ตาราง dt_pos_terminals มาในขั้น 4 (audit ใช้ {@code terminalId} ได้เมื่อเป็นเครื่องของบริษัทเท่านั้น).
+ * {@code X-Terminal-Id} ของ request ตามที่ส่งมา (เลขเครื่อง POS — จำนวนเต็ม > 0, อื่น = ไม่มี) — ยังไม่ตรวจกับทะเบียน (POS / กะตรวจด้วย
+ * {@code terminalError()}); เลขที่เป็นเครื่องของบริษัทแล้วอยู่ใน {@code ShopSession.terminalId()} (audit).
  */
 public record TerminalContext(Long terminalId) {
 

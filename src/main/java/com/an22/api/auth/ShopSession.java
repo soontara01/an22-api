@@ -14,6 +14,7 @@ import java.util.List;
  * @param branches สาขาที่ใช้งานอยู่ที่ผู้ใช้เข้าได้ ({@code canWorkIn()}) เรียงตาม id
  * @param suspendedReason {@code overdue} / {@code platform} / {@code deletion}, null = ใช้งานอยู่
  * @param planId แพ็กเกจ (E34)
+ * @param terminalId {@code X-Terminal-Id} เมื่อเป็นเครื่องของบริษัทนี้ (audit), ไม่ใช่ / ไม่ส่ง = null
  */
 public record ShopSession(
     long tenantId,
@@ -27,7 +28,8 @@ public record ShopSession(
     String taxId,
     boolean staffSeeCost,
     User user,
-    List<Branch> branches) {
+    List<Branch> branches,
+    Integer terminalId) {
 
   public static final String ATTR = ShopSession.class.getName();
 
