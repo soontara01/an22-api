@@ -285,7 +285,13 @@ api รันได้หลาย instance หลัง load balancer โดย
 - กฎ: `UserRules` (`canWorkIn`, `hasAdminRights`, `isCompanyAdmin`, …), `CompanyRules.normalizeCompanyCode`, `CostVisibility.canSeeCost`, `SubscriptionRules` (`subscriptionStatus`, `billingNotice`, ข้อความระงับ)
 - `JwtService`, `SecurityConfig` (chain `/api/platform/**` ↔ ร้าน), `TenantTransactionManager`, `BranchContext`, `TerminalContext`, `ClientIp`
 - endpoint: `POST /auth/login` (E3 ข้อความเดียว, ระงับ / รอลบ ตามลำดับ mock, audit `login` / `login_failed`), `GET /me`, `POST /auth/verify` (400 เสมอ), `POST /platform/auth/login`, `GET /platform/me`
-- จำกัด login ผิด / `auth/verify` ต่อบัญชี + ต่อ `X-Real-IP` (ตาราง platform นับครั้ง) — **ต้องถามผู้ใช้ก่อนทำ: จำนวนครั้ง / ระยะเวลา / ข้อความ** แล้วเพิ่มใน `api-contract.md`
+- จำกัด login ผิด / `auth/verify` ต่อบัญชี + ต่อ `X-Real-IP` (ตาราง platform นับครั้ง) — **ตกลง 2026-10-22**:
+  - ต่อบัญชี (บริษัท + username ที่พิมพ์ — นับแม้ไม่มีบัญชีนี้จริง ไม่บอกว่ามีหรือไม่): ผิดเกิน 5 ครั้งใน 15 นาที → ล็อก 15 นาที; ต่อ `X-Real-IP`: 30 ครั้ง / 15 นาที
+  - ใช้กับ `POST /auth/login`, `/auth/verify`, `/platform/auth/login`, `/shifts/:id/unlock` (ขั้น 8)
+  - เกิน → **429** "พยายามบ่อยเกินไป กรุณารอสักครู่แล้วลองใหม่" (ข้อความเดียวกับ an22-web; ไม่ใช่ 401 จึงไม่ logout คนหน้าเครื่อง POS)
+  - เพิ่มใน `../FrontEnd-An22/docs/backend/api-contract.md` (+ mock ถ้าจำเป็น) commit เดียวตอนทำขั้น 2
+- `dt_companies` เปิด RLS (**ตกลง 2026-10-22**, migration V2): policy `id = app_tenant_id()` — an22_app เห็นเฉพาะบริษัทตัวเอง, an22_platform (BYPASSRLS) เห็นทั้งหมด;
+  login / signup / ลืมรหัสผ่าน (ก่อนรู้บริษัท) ใช้ `platformTx`
 - test: login ถูก / ผิดทุกแบบ (ข้อความเดียว), token ร้านใช้กับ `/platform/**` ไม่ได้และกลับกัน, token หมดอายุ / ปลอม → 401, ปิดผู้ใช้แล้ว token เดิม → 401, `X-Branch-Id` ผิด → 403 (ยกเว้น `/me`), ไม่ log รหัสผ่าน
 
 ### ขั้น 3 — ตั้งค่าบริษัท / สาขา / ผู้ใช้
@@ -373,7 +379,7 @@ api รันได้หลาย instance หลัง load balancer โดย
 
 ## เรื่องที่ต้องถามผู้ใช้ระหว่างทาง (ไม่เดา)
 
-1. ขั้น 2: จำกัด login ผิดต่อบัญชี / IP — กี่ครั้ง, กี่นาที, ข้อความอะไร (ต้องเพิ่มใน `api-contract.md`)
+1. ~~ขั้น 2: จำกัด login ผิดต่อบัญชี / IP~~ — ตอบแล้ว 2026-10-22 (ขั้น 2)
 2. ขั้น 5: ทุนเฉลี่ย `numeric(14,2)` หรือ `(14,4)`
 3. ขั้น 10: เพิ่ม fixtures `credit-note.json` ฝั่งหน้าบ้านก่อนหรือไม่
 4. ขั้น 12: `GET /platform/outbox` ไม่มีใน api จริง — หน้า platform ต้องซ่อนเมนูนี้เมื่อไม่ใช่ mock หรือไม่
