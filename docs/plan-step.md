@@ -1,6 +1,6 @@
 # แผนทำ an22-api (C2) — ทีละขั้นย่อย
 
-สถานะ: ขั้น 2 เสร็จ 2026-10-22 — รอผู้ใช้ก่อนเริ่มขั้น 3
+สถานะ: ขั้น 3 เสร็จ 2026-10-22 — รอผู้ใช้ก่อนเริ่มขั้น 4
 
 ## บริบท
 
@@ -308,12 +308,22 @@ api รันได้หลาย instance หลัง load balancer โดย
   - spec: `../FrontEnd-An22` branch `docs/api-login-throttle` (commit `dc9b0fb`) เพิ่มกติกาจำกัด login + 429 ใน `api-contract.md` — mock ไม่จำลอง, ยังไม่ merge / push
 - test: login ถูก / ผิดทุกแบบ (ข้อความเดียว), token ร้านใช้กับ `/platform/**` ไม่ได้และกลับกัน, token หมดอายุ / ปลอม → 401, ปิดผู้ใช้แล้ว token เดิม → 401, `X-Branch-Id` ผิด → 403 (ยกเว้น `/me`), ไม่ log รหัสผ่าน
 
-### ขั้น 3 — ตั้งค่าบริษัท / สาขา / ผู้ใช้
+### ขั้น 3 — ตั้งค่าบริษัท / สาขา / ผู้ใช้ ✅ เสร็จ 2026-10-22
 - กฎ: `CompanyRules` (`branchError`, `branchDetailsError`, `companyInfoError`, `storeInfoOf`, …), `StoreInfoRules`, `MenuAccessRules`, `UserRules` (`userChangeError`, `userIdentityError`, `userBranchError`, `userScopeError`, `passwordError`, `ownerRoleError`, `ownerTransferError`), `PlanRules` (`planLimitError` 403)
 - endpoint: `/settings/store|company|branch|menu-access`, `/branches`, `/users` (+ `/password`), `POST /company/owner`
 - audit: `company_settings`, `branch_settings`, `branch_change`, `menu_access`, `user_change`, `user_password`, `owner_transfer`
 - test: สิทธิ์ 403 ตาม `saas-plan.md` หัวข้อ 17, admin สาขา (E6), แพ็กเกจเต็ม → 403, ข้าม tenant
-- (`requireShiftChangeError` ต้องรู้ว่ามีกะเปิด — ตาราง `shifts` ยังไม่มีในขั้นนี้ → ใส่ตอนขั้น 7)
+- (`requireShiftChangeError` ต้องรู้ว่ามีกะเปิด — ตาราง `shifts` ยังไม่มีในขั้นนี้ → ใส่ตอนขั้น 8 พร้อม "ปิดสาขาที่มีกะเปิด → 400")
+- ผลที่ทำ (รายละเอียดที่แผนไม่ได้ระบุ):
+  - package `branch/`, `company/` (settings + `POST /company/owner` + `PlanLimits`), `user/`; ตรวจ role ที่ controller ด้วย `web/Permissions` (ข้อความ 403 ตาม `adminOnlyError()` ของ mock)
+  - กฎที่นับทั้งบริษัท (เพดานแพ็กเกจ, admin ที่ใช้งาน ≥ 1, สาขาที่ใช้งาน ≥ 1, owner 1 คน) ล็อกด้วย `TenantLocks.lock(ACCOUNTS)` (`pg_advisory_xact_lock`) — request พร้อมกันไม่หลุดกฎ
+  - **`PUT /settings/branch` ไม่ส่ง `X-Branch-Id`**: mock แก้สาขาแรกแม้ admin สาขาไม่มีสิทธิ์ในสาขานั้น — api ตรวจว่าทำงานในสาขานั้นได้ (ไม่ได้ → 403 "ไม่มีสิทธิ์ทำงานในสาขานี้") (ตัดสินใจเอง: ปลอดภัยกว่า, หน้าบ้านส่ง header เสมอ)
+  - role นอก owner / admin / user ใน `/users` → 400 "ข้อมูลที่ส่งมาไม่ถูกต้อง" (mock ไม่ตรวจ — DB มี CHECK)
+  - id ใน path อ่านไม่ได้ (`/users/abc`) → 404 "ไม่มี endpoint …" เหมือน mock (เดิม 400)
+  - เพดานแพ็กเกจของเครื่อง POS นับ 0 จนกว่าจะมี `dt_pos_terminals` (ขั้น 4)
+  - ลบผู้ใช้: ลบ token ตั้งรหัสผ่านของผู้ใช้นั้นก่อน (ตาราง platform, FK RESTRICT) ด้วย platformTx
+  - `MenuAccessRules.MENU` ลอกรายการเมนู + ป้ายจาก `core/navigation/menu.config.ts` — หน้าบ้านเพิ่ม / เปลี่ยนเมนูต้องแก้ที่นี่ด้วย
+  - JSON: BigDecimal เป็นตัวเลขธรรมดา (`JacksonConfig`), ตัวเลขของ CompanyInfo ไม่มีทศนิยมเกิน (5 ไม่ใช่ 5.00)
 
 ### ขั้น 4 — ข้อมูลหลัก
 - migration: `categories`, `suppliers`, `payment_methods`, `pos_terminals`, `sku_prices` (`EXCLUDE USING gist` — ต้องมี extension `btree_gist`), `promotions` (+ สาขา / ของแถม)

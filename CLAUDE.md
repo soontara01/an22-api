@@ -47,16 +47,20 @@ docker/          initdb.sh (สร้าง azure_admin จำลอง server a
 scripts/         db-apply.sh
 src/main/java/com/an22/api/
   config/        ApiProperties (env ทั้งหมด + check()), ClockConfig (Asia/Bangkok), DataSourceConfig (app / platform, appTx / platformTx, JdbcClient), FlywayConfig
-  db/            TxActor (ผู้ทำของ request — ThreadLocal), TenantTransactionManager (ตั้ง app.* ทุก transaction), TxGuardDataSource, ActorDao
+  db/            TxActor (ผู้ทำของ request — ThreadLocal), TenantTransactionManager (ตั้ง app.* ทุก transaction), TxGuardDataSource, ActorDao,
+                 TenantLocks (pg_advisory_xact_lock ต่อบริษัท — กฎที่นับทั้งบริษัท)
   security/      PiiCipher (+ PiiConfig), JwtService, SecurityConfig (3 chain), ShopSessionFilter, PlatformSessionFilter
   web/           ApiException, ErrorResponse (ข้อความกลาง), ErrorHandler, FallbackErrorController (/error), RequestLogFilter,
                  ClientIp (X-Real-IP), BranchContext, TerminalContext, RequestContextResolvers
   model/         record ของ JSON = interface TS (User, Branch, Company, Session, LoginResponse, BillingInvoice …)
   rules/         กฎที่ port จาก core/models — pure Java ไม่ผูก Spring, 1 class ต่อ 1 ไฟล์ TS (UserRules, CompanyRules, CostVisibility, SubscriptionRules)
   health/        /healthz, /readyz
-  auth/          login / verify / me (AuthController → AuthService / SessionService → SessionDao), LoginThrottle (+ Dao), ShopSession
+  auth/          login / verify / me (AuthController → AuthService / SessionService → SessionDao), LoginThrottle (+ Dao), ShopSession, PasswordResetTokens
   platform/      /platform/auth/login, /platform/me
-  audit/         AuditDao, AuditEntry
+  branch/        /branches
+  company/       /settings/* (SettingsController → SettingsService → CompanyInfoDao / MenuAccessDao), /company/owner, PlanLimits
+  user/          /users (+ password); UserDao.SELECT / row ใช้ร่วมกับ SessionDao
+  audit/         Audit (บันทึกเหตุการณ์ของผู้ใช้ร้านใน transaction ของ service), AuditDao, AuditEntry
   <feature>/     XxxController → XxxService → XxxDao
 src/test/java/com/an22/api/
   support/       TestDatabase (singleton container), ApiTest (base: @SpringBootTest + MockMvc, get/post/delete ใส่ /api ให้, `login()` → token, `bearer()`),
@@ -88,6 +92,16 @@ src/test/java/com/an22/api/
 - งานที่ต้องบันทึกแม้ request ล้ม (นับ login ผิด, audit `login_failed`) = service แยก `REQUIRES_NEW` (`LoginThrottle`)
 - จำกัด login ผิด: บัญชี 5 / IP 30 ครั้งใน 15 นาที → ล็อก 15 นาที, 429 — ใช้ `LoginThrottle.check()` / `fail()` / `succeed()` กับ endpoint ตรวจรหัสใหม่ (ปลดล็อก POS ขั้น 8)
 - รหัสผ่าน BCrypt (`PasswordEncoder` bean); ไม่มีผู้ใช้ก็ยังตรวจกับ hash หลอก (เวลาตอบไม่บอกว่ามีชื่อนี้)
+
+## Endpoint ของร้าน — รูปแบบ (ขั้น 3 เป็นต้นไป)
+
+- controller: `Permissions.requireAdmin(session, "<ข้อความ 403 ของ mock>")` / `requireCompanyAdmin(session)` ก่อนเรียก service; ลำดับตรวจตาม mock
+  (`adminOnlyError()` → 404 → scope 403 → กฎ 400 → แพ็กเกจ 403)
+- service: เขียน → `@Transactional`, อ่าน → `@Transactional(readOnly = true)`; กฎที่นับทั้งบริษัทเรียก `TenantLocks.lock(...)` ก่อนอ่าน; เพิ่ม / เปิดใช้งานกลับ
+  record ที่แพ็กเกจนับ → `PlanLimits.check()` หลังกฎอื่นผ่าน; audit ผ่าน `Audit.record()` ใน transaction เดียวกัน (สำเร็จเท่านั้น)
+- dao: SQL ไม่ใส่ `WHERE tenant_id` (RLS กรอง) แต่ INSERT ใส่ `tenant_id = app_tenant_id()`; id ของบริษัทอื่น = ไม่เจอ → 404 เอง
+- PUT ทับเฉพาะ field ที่ส่ง (record ขาเข้า field เป็น nullable) เหมือน mock `{ ...current, ...body }`
+- test: `TestCompanies.create()` ต่อ test + `as(token, put(...), body)` / `message("…")`; ทุก endpoint มี test ข้าม tenant (`TenantB`) → 404
 
 ## PgBouncer (transaction pooling) — กติกาโค้ด
 

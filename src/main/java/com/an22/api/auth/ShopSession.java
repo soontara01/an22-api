@@ -13,12 +13,14 @@ import java.util.List;
  *
  * @param branches สาขาที่ใช้งานอยู่ที่ผู้ใช้เข้าได้ ({@code canWorkIn()}) เรียงตาม id
  * @param suspendedReason {@code overdue} / {@code platform} / {@code deletion}, null = ใช้งานอยู่
+ * @param planId แพ็กเกจ (E34)
  */
 public record ShopSession(
     long tenantId,
     String companyCode,
     boolean companyActive,
     String suspendedReason,
+    String planId,
     LocalDate purgeAfter,
     Subscription subscription,
     String companyName,

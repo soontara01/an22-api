@@ -1,5 +1,6 @@
 package com.an22.api.support;
 
+import java.util.List;
 import java.util.UUID;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -52,6 +53,17 @@ public class TestCompanies {
             "UPDATE dt_companies SET active = :active, suspended_reason = :reason,"
                 + " purge_after = CASE WHEN :reason = 'deletion' THEN DATE '2026-12-01' END WHERE id = :id")
         .param("active", reason == null).param("reason", reason).param("id", c.id()).update());
+  }
+
+  public void setPlan(Company c, String planId) {
+    sql.platform(jdbc -> jdbc.sql("UPDATE dt_companies SET plan_id = :p WHERE id = :id").param("p", planId).param("id", c.id()).update());
+  }
+
+  /** เหตุการณ์ใน audit log ของบริษัท: {@code action|ref_label|detail} เรียงตามเวลา. */
+  public List<String> audit(Company c, String action) {
+    return sql.platform(jdbc -> jdbc.sql(
+            "SELECT action || '|' || coalesce(ref_label, '') || '|' || detail FROM dt_audit_log WHERE tenant_id = :t AND action = :a ORDER BY id")
+        .param("t", c.id()).param("a", action).query(String.class).list());
   }
 
   public void setUserActive(Company c, long userId, boolean active) {

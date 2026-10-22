@@ -58,6 +58,28 @@ public abstract class ApiTest {
     return MockMvcRequestBuilders.post("/api" + path).contextPath("/api");
   }
 
+  protected static MockHttpServletRequestBuilder put(String path) {
+    return MockMvcRequestBuilders.put("/api" + path).contextPath("/api");
+  }
+
+  /** request ของผู้ใช้ร้าน (+ body JSON ถ้ามี). */
+  protected static MockHttpServletRequestBuilder as(String token, MockHttpServletRequestBuilder request, Object body) {
+    request.header("Authorization", bearer(token));
+    if (body != null) {
+      request.contentType(MediaType.APPLICATION_JSON).content(JSON.writeValueAsString(body));
+    }
+    return request;
+  }
+
+  protected static MockHttpServletRequestBuilder as(String token, MockHttpServletRequestBuilder request) {
+    return as(token, request, null);
+  }
+
+  /** {@code {"message": "…"}}. */
+  protected static String message(String text) {
+    return JSON.writeValueAsString(Map.of("message", text));
+  }
+
   protected static MockHttpServletRequestBuilder delete(String path) {
     return MockMvcRequestBuilders.delete("/api" + path).contextPath("/api");
   }

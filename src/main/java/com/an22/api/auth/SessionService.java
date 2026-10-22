@@ -59,7 +59,7 @@ public class SessionService {
   /** ประกอบ session จากแถวที่อ่านแล้ว ({@code companySession()} ของ mock). */
   static ShopSession of(CompanyRow c, User user, List<Branch> allBranches) {
     return new ShopSession(
-        c.id(), c.code(), c.active(), c.suspendedReason(), c.purgeAfter(), c.subscription(), c.name(), c.taxId(),
+        c.id(), c.code(), c.active(), c.suspendedReason(), c.planId(), c.purgeAfter(), c.subscription(), c.name(), c.taxId(),
         c.staffSeeCost(), user, allBranches.stream().filter(b -> UserRules.canWorkIn(user, b)).toList());
   }
 

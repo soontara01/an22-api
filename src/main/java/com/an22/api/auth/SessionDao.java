@@ -4,6 +4,7 @@ import com.an22.api.model.BillingInvoice;
 import com.an22.api.model.Branch;
 import com.an22.api.model.Subscription;
 import com.an22.api.model.User;
+import com.an22.api.user.UserDao;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
@@ -32,6 +33,7 @@ public class SessionDao {
       String code,
       boolean active,
       String suspendedReason,
+      String planId,
       LocalDate purgeAfter,
       Subscription subscription,
       String name,
@@ -42,15 +44,11 @@ public class SessionDao {
   public record UserRow(User user, String passwordHash) {}
 
   private static final String COMPANY =
-      "SELECT c.id, c.code, c.active, c.suspended_reason, c.purge_after, c.trial_ends_on, c.next_invoice_on,"
+      "SELECT c.id, c.code, c.active, c.suspended_reason, c.plan_id, c.purge_after, c.trial_ends_on, c.next_invoice_on,"
           + " i.name, i.tax_id, i.staff_see_cost"
           + " FROM dt_companies c JOIN dt_company_info i ON i.tenant_id = c.id WHERE c.deleted_at IS NULL";
 
-  private static final String USER =
-      "SELECT u.id, u.username, u.name, u.email, u.role, u.active, u.all_branches, u.created_at, u.password_hash,"
-          + " ARRAY(SELECT b.branch_id FROM dt_user_branches b WHERE b.tenant_id = u.tenant_id AND b.user_id = u.id"
-          + "       ORDER BY b.branch_id) AS branch_ids"
-          + " FROM dt_users u WHERE u.tenant_id = :tenant";
+  private static final String USER = UserDao.SELECT + " WHERE u.tenant_id = :tenant";
 
   private final JdbcClient app;
   private final JdbcClient platform;
@@ -120,6 +118,7 @@ public class SessionDao {
         rs.getString("code"),
         rs.getBoolean("active"),
         rs.getString("suspended_reason"),
+        rs.getString("plan_id"),
         rs.getObject("purge_after", LocalDate.class),
         new Subscription(rs.getObject("trial_ends_on", LocalDate.class), rs.getObject("next_invoice_on", LocalDate.class)),
         rs.getString("name"),
@@ -128,19 +127,6 @@ public class SessionDao {
   }
 
   private static UserRow user(ResultSet rs, int i) throws SQLException {
-    boolean all = rs.getBoolean("all_branches");
-    List<Long> branchIds = all ? List.of() : List.of((Long[]) rs.getArray("branch_ids").getArray());
-    User user =
-        new User(
-            rs.getLong("id"),
-            rs.getString("username"),
-            rs.getString("name"),
-            rs.getString("email"),
-            rs.getString("role"),
-            rs.getBoolean("active"),
-            branchIds,
-            all,
-            rs.getTimestamp("created_at").toInstant());
-    return new UserRow(user, rs.getString("password_hash"));
+    return new UserRow(UserDao.row(rs, i), rs.getString("password_hash"));
   }
 }

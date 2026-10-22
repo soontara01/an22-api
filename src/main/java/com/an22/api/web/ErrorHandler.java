@@ -11,6 +11,7 @@ import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.ServletRequestBindingException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.servlet.NoHandlerFoundException;
@@ -37,10 +38,18 @@ public class ErrorHandler {
     return respond(HttpStatus.NOT_FOUND, ErrorResponse.noEndpoint(request.getMethod(), apiPath(request)));
   }
 
+  /** id ใน path อ่านไม่ได้ ({@code /users/abc}) = ไม่มี endpoint นี้ (mock จับ path ด้วย regex ตัวเลข); อื่น = 400. */
+  @ExceptionHandler(MethodArgumentTypeMismatchException.class)
+  ResponseEntity<ErrorResponse> typeMismatch(MethodArgumentTypeMismatchException e, HttpServletRequest request) {
+    if (e.getParameter().hasParameterAnnotation(PathVariable.class)) {
+      return noEndpoint(request);
+    }
+    return badRequest();
+  }
+
   @ExceptionHandler({
     HttpMessageNotReadableException.class,
     HttpMediaTypeNotSupportedException.class,
-    MethodArgumentTypeMismatchException.class,
     MethodArgumentNotValidException.class,
     ServletRequestBindingException.class
   })
