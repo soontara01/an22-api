@@ -15,6 +15,7 @@ class ApiPropertiesTest {
             url, migrateUrl, "an22_app", "app-secret", "an22_platform", "platform-secret", "an22_owner",
             ownerPassword, 10, migrate, List.of("filesystem:db/migration")),
         new ApiProperties.Pii("k", "h"),
+        new ApiProperties.Jwt("1:secret", 7),
         new ApiProperties.Log(ApiProperties.LogBody.ERROR, 4096));
   }
 

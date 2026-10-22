@@ -19,7 +19,13 @@ class SchemaConventionsIT extends ApiTest {
 
   /** ตารางที่ an22_app แตะได้ทั้งที่ไม่มี tenant_id (+ สิทธิ์ที่ได้) — นอกนี้ห้ามมีสิทธิ์. */
   private static final List<String> APP_PLATFORM_GRANTS =
-      List.of("dt_companies:SELECT", "flyway_schema_history:SELECT" /* validate ของ FLYWAY_MIGRATE=false */);
+      List.of(
+          "dt_companies:SELECT",
+          "dt_billing_invoices:SELECT",
+          "flyway_schema_history:SELECT" /* validate ของ FLYWAY_MIGRATE=false */);
+
+  /** ตาราง platform ที่ an22_app อ่านได้ต้องอยู่ใต้ RLS (เห็นเฉพาะบริษัทตัวเอง). */
+  private static final List<String> APP_READABLE_PLATFORM_TABLES = List.of("dt_companies", "dt_billing_invoices");
 
   /** ตาราง append-only: an22_app ห้าม UPDATE / DELETE, ไม่มี updated_*. */
   private static final List<String> APPEND_ONLY = List.of("dt_audit_log");
@@ -70,6 +76,15 @@ class SchemaConventionsIT extends ApiTest {
             + " AND NOT (c.relrowsecurity AND c.relforcerowsecurity"
             + "  AND EXISTS (SELECT 1 FROM pg_policy p WHERE p.polrelid = c.oid AND p.polname = 'tenant_isolation'))");
     assertThat(missing).as("ตารางที่มี tenant_id แต่ไม่มี RLS (ENABLE + FORCE + policy)").isEmpty();
+  }
+
+  @Test
+  void platformTablesTheAppReadsAreUnderRls() throws Exception {
+    List<String> missing =
+        rows(TABLES + " AND c.relname IN (" + quoted(APP_READABLE_PLATFORM_TABLES) + ")"
+            + " AND NOT (c.relrowsecurity AND c.relforcerowsecurity"
+            + "  AND EXISTS (SELECT 1 FROM pg_policy p WHERE p.polrelid = c.oid AND p.polname = 'tenant_isolation'))");
+    assertThat(missing).isEmpty();
   }
 
   @Test

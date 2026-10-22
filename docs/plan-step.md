@@ -1,6 +1,6 @@
 # แผนทำ an22-api (C2) — ทีละขั้นย่อย
 
-สถานะ: ขั้น 1 เสร็จ 2026-10-22 — รอผู้ใช้ก่อนเริ่มขั้น 2
+สถานะ: ขั้น 2 เสร็จ 2026-10-22 — รอผู้ใช้ก่อนเริ่มขั้น 3
 
 ## บริบท
 
@@ -281,7 +281,7 @@ api รันได้หลาย instance หลัง load balancer โดย
   - test ใช้ `support/TenantSql` (ตั้ง app.* แบบ SET LOCAL เหมือน TenantTransactionManager ขั้น 2) + `support/TenantB` (บริษัทที่ 2)
 - test: migrate บน DB ว่าง (ทั้งผ่านแอปและ `scripts/db-apply.sh`); RLS — ตั้ง tenant 1 ไม่เห็นแถวของ tenant 2 / ไม่ตั้ง = 0 แถว / INSERT ด้วย tenant อื่นถูกปฏิเสธ; `an22_app` UPDATE / DELETE `audit_log` ไม่ได้; `an22_app` ไม่มี BYPASSRLS และไม่ใช่ owner; unique รวม tenant (username ซ้ำได้ข้ามบริษัท); FK รวม tenant — `user_branches` อ้างสาขาของบริษัทอื่นไม่ได้; trigger ตั้ง `created_*` / `updated_*` ถูก (insert / update คนละผู้ใช้, แก้ `created_*` ทับไม่ได้)
 
-### ขั้น 2 — auth / tenant / branch (แกนของทุก request)
+### ขั้น 2 — auth / tenant / branch (แกนของทุก request) ✅ เสร็จ 2026-10-22
 - กฎ: `UserRules` (`canWorkIn`, `hasAdminRights`, `isCompanyAdmin`, …), `CompanyRules.normalizeCompanyCode`, `CostVisibility.canSeeCost`, `SubscriptionRules` (`subscriptionStatus`, `billingNotice`, ข้อความระงับ)
 - `JwtService`, `SecurityConfig` (chain `/api/platform/**` ↔ ร้าน), `TenantTransactionManager`, `BranchContext`, `TerminalContext`, `ClientIp`
 - endpoint: `POST /auth/login` (E3 ข้อความเดียว, ระงับ / รอลบ ตามลำดับ mock, audit `login` / `login_failed`), `GET /me`, `POST /auth/verify` (400 เสมอ), `POST /platform/auth/login`, `GET /platform/me`
@@ -292,6 +292,20 @@ api รันได้หลาย instance หลัง load balancer โดย
   - เพิ่มใน `../FrontEnd-An22/docs/backend/api-contract.md` (+ mock ถ้าจำเป็น) commit เดียวตอนทำขั้น 2
 - `dt_companies` เปิด RLS (**ตกลง 2026-10-22**, migration V2): policy `id = app_tenant_id()` — an22_app เห็นเฉพาะบริษัทตัวเอง, an22_platform (BYPASSRLS) เห็นทั้งหมด;
   login / signup / ลืมรหัสผ่าน (ก่อนรู้บริษัท) ใช้ `platformTx`
+- ผลที่ทำ (รายละเอียดที่แผนไม่ได้ระบุ):
+  - Security 3 chain: public (`/healthz`, `/readyz`, `/error`, `POST /auth/login`, `POST /platform/auth/login`), `/platform/**` (aud `platform`), ร้าน (aud `shop`)
+    — `auth/verify` อยู่ใน chain ร้าน แต่ไม่มี / ไม่รู้จัก token / session ไม่ผ่าน → 400 ข้อความเดียว (ไม่ใช่ 401)
+  - `ShopSessionFilter` (หลังตรวจ JWT): `TxActor` = บริษัท + ผู้ใช้ของ token → `SessionService.load()` อ่านบริษัท / ผู้ใช้ / สาขาจาก DB ทุก request → รอลบ 403 → `X-Branch-Id` 403
+    → `X-Terminal-Id`; controller รับ `ShopSession` / `BranchContext` (`require()` → 400 ไม่ได้เลือกสาขา) / `TerminalContext` เป็น parameter
+  - `TxActor` (ThreadLocal) → `TenantTransactionManager` ตั้ง app.* ทุก transaction (ทั้ง appTx / platformTx); รู้ผู้ทำกลาง transaction ใช้ `ActorDao`; job (ขั้น 11) ตั้ง `TxActor` เอง
+  - `TxGuardDataSource`: JdbcClient ขอ connection นอก transaction → error
+  - `JWT_SECRET` = `<kid ตัวเลข>:<base64 ≥ 32 byte>,…` เซ็นด้วย kid สูงสุด (แบบเดียวกับ `PII_KEYS`), `JWT_TTL_DAYS` ≥ 7, claims ตามแผน + `iss = an22-api`
+  - V2: RLS ของ `dt_companies` (ตามที่ตกลง) + **`dt_billing_invoices` ใต้ RLS (`company_id = app_tenant_id()`) และให้ an22_app อ่านได้** (แถบแจ้งเตือนใน `/me` อ่านด้วย appTx แทน platformTx — ตัดสินใจเองในขั้นนี้)
+    + `dt_login_throttle` (key = HMAC ด้วย `PII_HASH_KEY` — ไม่เก็บ username / IP ตรง ๆ)
+  - ตอบ 403 ของ Spring Security แบบข้อความกลางที่ตั้งเองในขั้น 0 ถูกเอาออก — 403 มาจาก `ApiException` ตาม mock เท่านั้น
+  - audit `login`: `terminalId` = null จนกว่าจะมี `dt_pos_terminals` (ขั้น 4 ตรวจว่าเป็นเครื่องของบริษัท); billing ของ login / me อ่านใบแจ้งหนี้ที่มี — ออกใบ / ระงับ (`catchUp`) เป็นขั้น 11
+  - record ของ JSON (ตรงกับ interface TS) อยู่ใน package `model/`; กฎที่ port อยู่ `rules/` (`UserRules`, `CompanyRules`, `CostVisibility`, `SubscriptionRules`)
+  - spec: `../FrontEnd-An22` branch `docs/api-login-throttle` (commit `dc9b0fb`) เพิ่มกติกาจำกัด login + 429 ใน `api-contract.md` — mock ไม่จำลอง, ยังไม่ merge / push
 - test: login ถูก / ผิดทุกแบบ (ข้อความเดียว), token ร้านใช้กับ `/platform/**` ไม่ได้และกลับกัน, token หมดอายุ / ปลอม → 401, ปิดผู้ใช้แล้ว token เดิม → 401, `X-Branch-Id` ผิด → 403 (ยกเว้น `/me`), ไม่ log รหัสผ่าน
 
 ### ขั้น 3 — ตั้งค่าบริษัท / สาขา / ผู้ใช้

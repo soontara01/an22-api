@@ -155,10 +155,15 @@ public final class PiiCipher {
    * มี tenant ใน hash: คนเดียวกันต่างบริษัทได้ค่าต่างกัน.
    */
   public byte[] hashTaxId(long tenantId, String taxId) {
+    return hmac(tenantId + ":" + normalizeTaxId(taxId));
+  }
+
+  /** HMAC-SHA256 (กุญแจ {@code PII_HASH_KEY}) ของค่าใด ๆ — เก็บ key ที่ค้นหาได้โดยไม่เก็บค่าจริง (username / IP ของตัวนับ login ผิด). */
+  public byte[] hmac(String value) {
     try {
       Mac mac = Mac.getInstance(HMAC);
       mac.init(hashKey);
-      return mac.doFinal((tenantId + ":" + normalizeTaxId(taxId)).getBytes(StandardCharsets.UTF_8));
+      return mac.doFinal(value.getBytes(StandardCharsets.UTF_8));
     } catch (GeneralSecurityException e) {
       throw new IllegalStateException("คำนวณ hash ไม่สำเร็จ", e);
     }

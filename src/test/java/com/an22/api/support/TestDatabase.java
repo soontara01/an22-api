@@ -32,6 +32,7 @@ public final class TestDatabase {
   public static final String PLATFORM_PASSWORD = secret();
   public static final String PII_KEYS = "1:" + key();
   public static final String PII_HASH_KEY = key();
+  public static final String JWT_SECRET = "1:" + key();
 
   private static final Network NETWORK = Network.newNetwork();
 
@@ -98,6 +99,7 @@ public final class TestDatabase {
     registry.add("an22.db.owner-password", () -> OWNER_PASSWORD);
     registry.add("an22.pii.keys", () -> PII_KEYS);
     registry.add("an22.pii.hash-key", () -> PII_HASH_KEY);
+    registry.add("an22.jwt.secret", () -> JWT_SECRET);
   }
 
   /** connection superuser ของ container ตรงเข้า database ของแอป — ใช้ตรวจ role / schema ใน test เท่านั้น. */

@@ -47,13 +47,21 @@ docker/          initdb.sh (สร้าง azure_admin จำลอง server a
 scripts/         db-apply.sh
 src/main/java/com/an22/api/
   config/        ApiProperties (env ทั้งหมด + check()), ClockConfig (Asia/Bangkok), DataSourceConfig (app / platform, appTx / platformTx, JdbcClient), FlywayConfig
-  security/      PiiCipher (+ PiiConfig), SecurityConfig — ขั้น 2: JwtService, CurrentUser, ClientIp
-  web/           ApiException, ErrorResponse (ข้อความกลาง), ErrorHandler, FallbackErrorController (/error), RequestLogFilter
+  db/            TxActor (ผู้ทำของ request — ThreadLocal), TenantTransactionManager (ตั้ง app.* ทุก transaction), TxGuardDataSource, ActorDao
+  security/      PiiCipher (+ PiiConfig), JwtService, SecurityConfig (3 chain), ShopSessionFilter, PlatformSessionFilter
+  web/           ApiException, ErrorResponse (ข้อความกลาง), ErrorHandler, FallbackErrorController (/error), RequestLogFilter,
+                 ClientIp (X-Real-IP), BranchContext, TerminalContext, RequestContextResolvers
+  model/         record ของ JSON = interface TS (User, Branch, Company, Session, LoginResponse, BillingInvoice …)
+  rules/         กฎที่ port จาก core/models — pure Java ไม่ผูก Spring, 1 class ต่อ 1 ไฟล์ TS (UserRules, CompanyRules, CostVisibility, SubscriptionRules)
   health/        /healthz, /readyz
-  rules/         (ขั้นถัดไป) กฎที่ port จาก core/models — pure Java ไม่ผูก Spring, 1 class ต่อ 1 ไฟล์ TS
+  auth/          login / verify / me (AuthController → AuthService / SessionService → SessionDao), LoginThrottle (+ Dao), ShopSession
+  platform/      /platform/auth/login, /platform/me
+  audit/         AuditDao, AuditEntry
   <feature>/     XxxController → XxxService → XxxDao
 src/test/java/com/an22/api/
-  support/       TestDatabase (singleton container), ApiTest (base: @SpringBootTest + MockMvc, get/post/delete ใส่ /api ให้), ProbeController (endpoint ของ test), RolesSqlIT,
+  support/       TestDatabase (singleton container), ApiTest (base: @SpringBootTest + MockMvc, get/post/delete ใส่ /api ให้, `login()` → token, `bearer()`),
+                 ProbeController + ProbeService (endpoint ของ test — `/test-probe/session` ผ่าน ShopSessionFilter ครบ), RolesSqlIT,
+                 TestCompanies (บริษัทใหม่ต่อ test: owner / boss / staff / gone รหัส 1234, สาขา HQ / BN / OLD — เปลี่ยนสถานะได้ไม่กระทบ DEMO),
                  TenantSql (รัน SQL เป็น an22_app ในนามบริษัท / ผู้ใช้ — `as` / `rolledBack` / `withoutTenant` / `platform`), TenantB (บริษัทที่ 2 สำหรับ test ข้าม tenant)
   db/            SchemaConventionsIT, RlsIT, RowStampIT, SeedIT
 ```
@@ -69,6 +77,17 @@ src/test/java/com/an22/api/
 - tx manager: `appTx` (ค่าเริ่ม, role `an22_app` ใต้ RLS) / `platformTx` (`@Transactional("platformTx")`, `an22_platform` BYPASSRLS); JdbcClient: `appJdbc` (ค่าเริ่ม) / `platformJdbc`
 - GET ใช้ `@Transactional(readOnly = true)` → PostgreSQL `READ ONLY` (enforceReadOnly เปิดแล้ว); ห้ามเรียก `@Transactional` method ใน class เดียวกัน; งานที่ต้องบันทึกแม้ request ล้ม = `REQUIRES_NEW`
 - ขั้น 2: `TenantTransactionManager` ตั้ง `app.tenant_id` / `app.user_id` / `app.actor_kind` (SET LOCAL) ทุก transaction, TxGuard (query นอก transaction → error)
+
+## Request ของร้าน / platform (ขั้น 2)
+
+- 3 chain: public (`/healthz`, `/readyz`, `POST /auth/login`, `POST /platform/auth/login`) · `/platform/**` (token aud `platform`) · ที่เหลือ = ร้าน (aud `shop`)
+  — endpoint public ใหม่ (signup, ลืมรหัสผ่าน) ต้องเพิ่มใน `SecurityConfig.PUBLIC_PATHS`
+- `ShopSessionFilter` อ่านผู้ใช้ + บริษัทจาก DB ทุก request (ไม่ผ่าน → 401), ตั้ง `TxActor` (ทุก transaction ของ request ได้ RLS ของบริษัทนี้), ตรวจรอลบ (403) / `X-Branch-Id` (403)
+  — controller รับ `ShopSession`, `BranchContext`, `TerminalContext` (หรือ `PlatformAdmin`) เป็น parameter; งานเขียนสต็อก / ขาย / กะเรียก `branch.require()` (400)
+- tenant มาจาก token เท่านั้น — ห้ามรับ tenant จาก URL / query / body; สิทธิ์ / สาขาใช้ของ `ShopSession` (DB) ไม่ใช่ claims
+- งานที่ต้องบันทึกแม้ request ล้ม (นับ login ผิด, audit `login_failed`) = service แยก `REQUIRES_NEW` (`LoginThrottle`)
+- จำกัด login ผิด: บัญชี 5 / IP 30 ครั้งใน 15 นาที → ล็อก 15 นาที, 429 — ใช้ `LoginThrottle.check()` / `fail()` / `succeed()` กับ endpoint ตรวจรหัสใหม่ (ปลดล็อก POS ขั้น 8)
+- รหัสผ่าน BCrypt (`PasswordEncoder` bean); ไม่มีผู้ใช้ก็ยังตรวจกับ hash หลอก (เวลาตอบไม่บอกว่ามีชื่อนี้)
 
 ## PgBouncer (transaction pooling) — กติกาโค้ด
 
@@ -94,7 +113,8 @@ src/test/java/com/an22/api/
 ## Config (env — ครบใน `.env.example`)
 
 `DB_URL` (PgBouncer) · `DB_MIGRATE_URL` (ตรง) · `DB_APP_USER/PASSWORD` · `DB_PLATFORM_USER/PASSWORD` · `DB_OWNER_USER/PASSWORD` (ไม่ต้องเมื่อ `FLYWAY_MIGRATE=false`) ·
-`DB_POOL_SIZE` (10) · `FLYWAY_MIGRATE` (`true` migrate / `false` validate ผ่าน PgBouncer) · `PII_KEYS` · `PII_HASH_KEY` · `LOG_BODY` (`off` / `error` / `all`) · `LOG_BODY_MAX` (4096)
+`DB_POOL_SIZE` (10) · `FLYWAY_MIGRATE` (`true` migrate / `false` validate ผ่าน PgBouncer) · `PII_KEYS` · `PII_HASH_KEY` · `JWT_SECRET` (`<kid>:<base64>,…`) · `JWT_TTL_DAYS` (7) ·
+`LOG_BODY` (`off` / `error` / `all`) · `LOG_BODY_MAX` (4096)
 — ค่าผิด / ไม่ตั้ง → ไม่ start ข้อความบอก**ชื่อตัวแปร ไม่บอกค่า** (`ApiProperties.check()`, `PiiCipher.fromEnv`) — ห้ามใช้ bean validation กับค่าลับ (error ของ binding พิมพ์ค่า)
 
 ## ความปลอดภัย (E48 / E49)
@@ -131,6 +151,8 @@ JSON 1 บรรทัดต่อ event ไป stdout (Spring Boot structured l
 - integration test สืบทอด `ApiTest` (context เดียวกันถูก cache — อย่าเพิ่ม `@TestPropertySource` / `@MockitoBean` โดยไม่จำเป็น: ได้ context + pool ใหม่)
 - DB จริงเสมอผ่าน PgBouncer (จับ bug ของ transaction pooling); ทุกขั้นต้องมี test ข้าม tenant (token บริษัท A อ่าน / เขียนของ B → 404)
 - `TestDatabase` เปิด container ใน `start()` (ไม่ใช่ static initializer — lambda ของ class ถูกเรียกจาก thread อื่น → deadlock)
+- test ที่ login ผิดหลายครั้งต้องส่ง `X-Real-IP` ของตัวเอง (ตัวนับต่อ IP อยู่ใน DB ที่ทุก test ใช้ร่วม); เทียบ array ใน JSON ใช้ `jsonPath(path, Matchers.contains(…))`
+  (`.value(List.of(…))` ไม่ match กับ JsonPath ใน Boot 4)
 
 ## Git
 

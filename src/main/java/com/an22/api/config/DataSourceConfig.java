@@ -1,5 +1,7 @@
 package com.an22.api.config;
 
+import com.an22.api.db.TenantTransactionManager;
+import com.an22.api.db.TxGuardDataSource;
 import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
 import javax.sql.DataSource;
@@ -9,7 +11,6 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.DependsOn;
 import org.springframework.context.annotation.Primary;
 import org.springframework.jdbc.core.simple.JdbcClient;
-import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.transaction.PlatformTransactionManager;
 
 /**
@@ -20,7 +21,8 @@ import org.springframework.transaction.PlatformTransactionManager;
  *   <li>{@code platform} — role {@code an22_platform} (BYPASSRLS) — ใช้ {@code @Transactional("platformTx")}
  * </ul>
  *
- * Flyway ไม่ใช้ตัวนี้ (ต่อ PostgreSQL ตรง — {@link FlywayConfig}).
+ * JdbcClient ห่อด้วย {@link TxGuardDataSource} (query นอก transaction → error); Flyway ไม่ใช้ตัวนี้ (ต่อ PostgreSQL ตรง —
+ * {@link FlywayConfig}).
  */
 @Configuration(proxyBeanMethods = false)
 public class DataSourceConfig {
@@ -54,20 +56,18 @@ public class DataSourceConfig {
   @Primary
   @DependsOn("flywayRunner")
   JdbcClient appJdbc(@Qualifier("appDataSource") DataSource dataSource) {
-    return JdbcClient.create(dataSource);
+    return JdbcClient.create(new TxGuardDataSource(dataSource));
   }
 
   @Bean
   @DependsOn("flywayRunner")
   JdbcClient platformJdbc(@Qualifier("platformDataSource") DataSource dataSource) {
-    return JdbcClient.create(dataSource);
+    return JdbcClient.create(new TxGuardDataSource(dataSource));
   }
 
-  private static DataSourceTransactionManager txManager(DataSource dataSource) {
-    DataSourceTransactionManager tx = new DataSourceTransactionManager(dataSource);
-    // readOnly = true → SET TRANSACTION READ ONLY ใน transaction นั้น (ชั้นที่สองของ "GET ห้ามแก้ข้อมูล", E49)
-    tx.setEnforceReadOnly(true);
-    return tx;
+  /** ตั้ง app.* จาก TxActor ทุก transaction + readOnly → SET TRANSACTION READ ONLY (ชั้นที่สองของ "GET ห้ามแก้ข้อมูล", E49). */
+  private static TenantTransactionManager txManager(DataSource dataSource) {
+    return new TenantTransactionManager(dataSource);
   }
 
   private static HikariDataSource pool(String name, String url, String user, String password, int size) {

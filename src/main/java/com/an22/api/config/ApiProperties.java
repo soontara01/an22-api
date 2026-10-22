@@ -10,7 +10,7 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * เพราะ error ของการ bind พิมพ์ค่าที่ตั้งไว้ลง log (มีรหัสผ่าน / กุญแจ).
  */
 @ConfigurationProperties("an22")
-public record ApiProperties(Db db, Pii pii, Log log) {
+public record ApiProperties(Db db, Pii pii, Jwt jwt, Log log) {
 
   public record Db(
       String url,
@@ -26,6 +26,12 @@ public record ApiProperties(Db db, Pii pii, Log log) {
       @DefaultValue("filesystem:db/migration") List<String> locations) {}
 
   public record Pii(String keys, String hashKey) {}
+
+  /**
+   * @param secret {@code JWT_SECRET} = {@code <kid>:<base64 ≥ 32 byte>,…} — เซ็นด้วย kid สูงสุด ตรวจได้ทุกตัว (หมุน secret)
+   * @param ttlDays {@code JWT_TTL_DAYS} อายุ token (≥ 7 = เพดาน session ของ web, E48)
+   */
+  public record Jwt(String secret, @DefaultValue("7") int ttlDays) {}
 
   public enum LogBody {
     OFF,
@@ -47,6 +53,10 @@ public record ApiProperties(Db db, Pii pii, Log log) {
     if (db.migrate()) {
       required(problems, "DB_OWNER_USER", db.ownerUser());
       required(problems, "DB_OWNER_PASSWORD", db.ownerPassword());
+    }
+    required(problems, "JWT_SECRET", jwt.secret());
+    if (jwt.ttlDays() < 7) {
+      problems.add("JWT_TTL_DAYS ต้อง ≥ 7 (เพดาน session ของ an22-web)");
     }
     if (db.poolSize() < 1) {
       problems.add("DB_POOL_SIZE ต้องเป็นจำนวนเต็ม ≥ 1");

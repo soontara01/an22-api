@@ -155,7 +155,7 @@ public class RequestLogFilter extends OncePerRequestFilter {
     fields.put("userId", request.getAttribute(ATTR_USER_ID));
     fields.put("branchId", request.getAttribute(ATTR_BRANCH_ID));
     fields.put("terminalId", request.getAttribute(ATTR_TERMINAL_ID));
-    fields.put("ip", clientIp(request));
+    fields.put("ip", ClientIp.of(request));
     boolean withBody = cachedRequest != null && (bodyMode == LogBody.ALL || status >= 400);
     if (withBody) {
       Body req = body(cachedRequest.getContentType(), cachedRequest.getContentAsByteArray(), cachedRequest.getContentLength());
