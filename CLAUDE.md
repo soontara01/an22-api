@@ -60,6 +60,8 @@ src/main/java/com/an22/api/
   platform/      /platform/auth/login, /platform/me
   branch/        /branches
   masterdata/    /categories, /suppliers, /payment-methods (+ order)
+  product/       /products (+ stock, movements, branch-stock, serials) — ProductService
+  stock/         StockLedger (จุดเดียวที่แก้สต็อก), StockDao (branch_stock + stock_movements), SerialDao
   pos/           /pos-terminals (ขั้น 8: กะ / ล็อก / บิลพัก)
   company/       /settings/* (SettingsController → SettingsService → CompanyInfoDao / MenuAccessDao), /company/owner, PlanLimits
   user/          /users (+ password); UserDao.SELECT / row ใช้ร่วมกับ SessionDao
@@ -103,7 +105,10 @@ src/test/java/com/an22/api/
 - service: เขียน → `@Transactional`, อ่าน → `@Transactional(readOnly = true)`; กฎที่นับทั้งบริษัทเรียก `TenantLocks.lock(...)` ก่อนอ่าน; เพิ่ม / เปิดใช้งานกลับ
   record ที่แพ็กเกจนับ → `PlanLimits.check()` หลังกฎอื่นผ่าน; audit ผ่าน `Audit.record()` ใน transaction เดียวกัน (สำเร็จเท่านั้น)
 - dao: SQL ไม่ใส่ `WHERE tenant_id` (RLS กรอง) แต่ INSERT ใส่ `tenant_id = app_tenant_id()`; id ของบริษัทอื่น = ไม่เจอ → 404 เอง
-- PUT ทับเฉพาะ field ที่ส่ง (record ขาเข้า field เป็น nullable) เหมือน mock `{ ...current, ...body }`
+- PUT ทับเฉพาะ field ที่ส่ง (record ขาเข้า field เป็น nullable) เหมือน mock `{ ...current, ...body }` — ยกเว้นที่ mock แทนทั้งตัว (ผู้จำหน่าย / ช่องทางชำระ)
+- **สต็อกเปลี่ยนผ่าน `StockLedger` เท่านั้น** (`receive` / `issue` / `recordSerials`): ล็อกแถว `branch_stock` FOR UPDATE → `Costing` → update → movement;
+  เอกสารหลายบรรทัดเรียกเรียงตาม productId (กัน deadlock), เรียกหลังตรวจกฎผ่านแล้ว
+- ทุน: `CostHidingAdvice` ซ่อนให้เองทุก response (E43) — ห้ามซ่อนเองทีละ endpoint; ขาเข้าจากคนที่เห็นทุนไม่ได้ไม่ใช้ทุนใน body (E44 — ดู `ProductService.withStoredCosts`)
 - test: `TestCompanies.create()` ต่อ test + `as(token, put(...), body)` / `message("…")`; ทุก endpoint มี test ข้าม tenant (`TenantB`) → 404
 
 ## PgBouncer (transaction pooling) — กติกาโค้ด
@@ -114,6 +119,8 @@ src/test/java/com/an22/api/
 - prepared statement ระดับ protocol (pgJDBC ทำเองหลังซ้ำ 5 ครั้ง) ใช้ได้เพราะ `max_prepared_statements` > 0 — **Azure ต้องตั้ง `pgbouncer.max_prepared_statements` เอง** (ค่าเริ่ม 0)
 
 ## Schema (กติกาเต็มใน `docs/plan-step.md` หัวข้อ "Schema")
+
+- ทุนเฉลี่ย `numeric(14,4)` (round4), ทุนต่อหน่วย `numeric(14,4)`, เงิน / มูลค่า / COGS `numeric(14,2)` (round2); ประวัติ (movement, serial, audit) ไม่มี FK ไป record ที่ลบได้
 
 - migration = SQL ล้วนใน `db/migration` (ไม่มี placeholder, **ไม่แก้ไฟล์ที่ apply แล้ว**), รันได้ทั้งแอปและ `db-apply.sh`; ไม่มี JPA / `ddl-auto`
 - ชื่อตาราง `dt_` + snake_case (ชื่อในแผน / `data-model.md` ไม่มี prefix); ทุกตารางข้อมูลมี `tenant_id` + `ENABLE` / `FORCE ROW LEVEL SECURITY` policy `current_setting('app.tenant_id', true)::bigint`

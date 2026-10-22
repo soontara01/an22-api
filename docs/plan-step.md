@@ -1,6 +1,6 @@
 # แผนทำ an22-api (C2) — ทีละขั้นย่อย
 
-สถานะ: ขั้น 4 เสร็จ 2026-10-22 — รอผู้ใช้ก่อนเริ่มขั้น 5
+สถานะ: ขั้น 5 เสร็จ 2026-10-22 — รอผู้ใช้ก่อนเริ่มขั้น 5b
 
 ## บริบท
 
@@ -342,8 +342,9 @@ api รันได้หลาย instance หลัง load balancer โดย
   - **ยังไม่ทำ (รอตารางของขั้นถัดไป)**: productCount ของหมวด / ผู้จำหน่าย + ลบที่มี SKU อ้าง (ขั้น 5), ลบหมวดที่มีโปรอ้าง (5b), ลบช่องทางที่มีการขายอ้าง (9),
     ปิดเครื่องที่มีกะเปิด (8), ลบเครื่องที่มีกะ / เอกสาร (8–10)
 
-### ขั้น 5 — SKU / สต็อก
-- **ถามผู้ใช้ก่อน**: ทุนเฉลี่ยเก็บ `numeric(14,2)` (ตรงกับ mock ที่ปัด 2 ตำแหน่ง) หรือ `numeric(14,4)` (`data-model.md` บอกให้ตกลงก่อนทำ)
+### ขั้น 5 — SKU / สต็อก ✅ เสร็จ 2026-10-22
+- **ตกลง 2026-10-22**: ทุนเฉลี่ย (`branch_stock.avg_cost`, `stock_movements.balance_avg_cost`) `numeric(14,4)` = ตรงกับ mock (`movingAverage()` ปัด `round4`);
+  มูลค่า / COGS / เงินอื่น `numeric(14,2)` (`round2`) — แก้ `data-model.md` ของหน้าบ้านให้ตรงโค้ดแล้ว (เดิมบอก 2 ตำแหน่ง)
 - migration: `products`, `product_pack_units`, `product_suppliers`, `branch_stock`, `stock_movements`, `serial_numbers`
 - กฎ: `ProductRules`, `Costing` (`movingAverage`, `buildStockCard`, …), `SerialRules`, `Money` (`moneyInputError`), กฎ SKU ที่อยู่ใน mock (`validateSku`, `receiptCostError`, การลบที่ถูกอ้าง)
 - endpoint: `/products` (+ `stock`, `movements`, `branch-stock`, `serials`, `serials/remove`); audit `stock_out`, `serial_remove`
@@ -359,6 +360,20 @@ api รันได้หลาย instance หลัง load balancer โดย
 - **ซ่อนทุน (E43 / E44)**: `CostHidingAdvice` — ทุก response ของคนที่ `canSeeCost` = false: key ใน `COST_FIELDS` → `null` ทุกระดับ + `{qty, avgCost, value}` → `value: null`; ขาเข้า SKU ไม่ใช้ `cost` / `suppliers[].cost` (คงค่าเดิม / ใหม่ = 0)
 - seed: สินค้า + สต็อกยกมา (`opening`) ของ HQ / BN ตามผลของ `migrateCosting` / `migrateBranchStock` / `syncSerials` ใน mock
 - test: ทุนเฉลี่ยตรงตัวอย่าง spec, สต็อกต่อสาขา, `user` ได้ทุนเป็น null ทุก endpoint ของขั้นนี้, `staffSeeCost` = true แล้วเห็น
+- ผลที่ทำ (รายละเอียดที่แผนไม่ได้ระบุ):
+  - package `product/` (SKU + สต็อก + serial — `ProductController` → `ProductService` → `ProductDao`), `stock/` (`StockLedger`, `StockDao`, `SerialDao`)
+  - **ประวัติไม่มี FK ไป products**: `stock_movements.product_id`, `serial_numbers.product_id` (แบบเดียวกับ audit_log — ลบ SKU ที่หมดของแล้วได้ตาม mock แต่ประวัติอยู่ต่อ);
+    ลบ SKU = ลบแพ็ก / ผู้จำหน่าย / แถวสต็อกต่อสาขา (เป็น 0) ก่อน
+  - `dt_stock_movements` append-only (an22_app INSERT + SELECT); `StockMovement.date` = `created_at`
+  - SKU serial: `branch_stock.stock` / `avg_cost` เก็บค่าที่นับ / เฉลี่ยจาก serial ในคลังทุกครั้งที่เดิน (อ่านทางเดียวกับ non-serial); ไม่เหลือ = ทุนเฉลี่ยเดิม (เหมือน mock)
+  - ทุนต่อหน่วย (ทุนมาตรฐาน, ผู้จำหน่าย, serial) `numeric(14,4)`; บัตรสต็อก unit / total / value `numeric(14,2)` (`recordMovement()` ปัด round2)
+  - PUT /products ทับเฉพาะที่ส่ง (mock `{ ...current, ...payload }`); POST ค่าที่ไม่ส่ง = `PRODUCT_DEFAULTS`
+  - `CostHidingAdvice` (ResponseBodyAdvice) = `hideCost()` ทุก response ของผู้ใช้ร้านที่เห็นทุนไม่ได้; productCount ของหมวด / ผู้จำหน่ายนับจริงแล้ว + ลบที่มี SKU อ้างไม่ได้
+  - รับ serial ที่ `in_transit` → 400 "`<serial>`: อยู่ระหว่างโอน" (ข้อความใหม่ — mock ไม่ตรวจและย้าย serial ระหว่างโอนได้ ซึ่งผิด); ใบโอนจริงในขั้น 6
+  - `PUT /products/:id/stock` `delta` ไม่ใช่จำนวนเต็ม (1.5) → 400 "จำนวนไม่ถูกต้อง" (ไม่ตัดทศนิยมเงียบ)
+  - test พร้อมกัน: ตัดสต็อกเดียวกัน 8 thread → ไม่ติดลบ (สำเร็จ 5 / 400 อีก 3), serial เดียวกันตัดออก 4 thread → สำเร็จ 1;
+    "2 บิลสลับลำดับไม่ deadlock" ทำในขั้น 9 (ยังไม่มีเอกสารหลายบรรทัด — `StockLedger` ให้ผู้เรียกเรียงตาม productId)
+  - ยังไม่ทำ: ระหว่างโอนนับเป็นสต็อก (ขั้น 6), ลบ SKU ที่มีการขาย (9) / อยู่ในโปร (5b), `currentPrice` (5b)
 
 ### ขั้น 5b — ราคาขาย + โปรโมชั่น (ย้ายจากขั้น 4 — ตกลง 2026-10-22)
 - migration: `sku_prices` (`EXCLUDE USING gist` — ต้องมี extension `btree_gist`; Azure: เปิดใน `azure.extensions` ก่อน), `promotions` (+ สาขา / ของแถม)
@@ -422,7 +437,7 @@ api รันได้หลาย instance หลัง load balancer โดย
 ## เรื่องที่ต้องถามผู้ใช้ระหว่างทาง (ไม่เดา)
 
 1. ~~ขั้น 2: จำกัด login ผิดต่อบัญชี / IP~~ — ตอบแล้ว 2026-10-22 (ขั้น 2)
-2. ขั้น 5: ทุนเฉลี่ย `numeric(14,2)` หรือ `(14,4)`
+2. ~~ขั้น 5: ทุนเฉลี่ย~~ — ตอบแล้ว 2026-10-22: `numeric(14,4)`
 3. ขั้น 10: เพิ่ม fixtures `credit-note.json` ฝั่งหน้าบ้านก่อนหรือไม่
 4. ขั้น 12: `GET /platform/outbox` ไม่มีใน api จริง — หน้า platform ต้องซ่อนเมนูนี้เมื่อไม่ใช่ mock หรือไม่
 5. ขั้น 9: ข้อความ error เมื่อ `reference` เป็นเลขบัตรเต็ม (แก้ spec หน้าบ้านก่อน)

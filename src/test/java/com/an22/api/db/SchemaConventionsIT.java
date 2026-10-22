@@ -28,7 +28,7 @@ class SchemaConventionsIT extends ApiTest {
   private static final List<String> APP_READABLE_PLATFORM_TABLES = List.of("dt_companies", "dt_billing_invoices");
 
   /** ตาราง append-only: an22_app ห้าม UPDATE / DELETE, ไม่มี updated_*. */
-  private static final List<String> APPEND_ONLY = List.of("dt_audit_log");
+  private static final List<String> APPEND_ONLY = List.of("dt_audit_log", "dt_stock_movements");
 
   private static List<String> rows(String sql) throws SQLException {
     List<String> out = new ArrayList<>();

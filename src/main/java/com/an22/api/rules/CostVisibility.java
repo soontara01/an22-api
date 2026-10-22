@@ -1,7 +1,14 @@
 package com.an22.api.rules;
 
-/** port จาก {@code core/models/cost-visibility.model.ts} — {@code hideCost()} มาในขั้น 5 (CostHidingAdvice). */
+import java.util.Set;
+
+/** port จาก {@code core/models/cost-visibility.model.ts} — {@code hideCost()} = {@code web/CostHidingAdvice}. */
 public final class CostVisibility {
+
+  /** {@code COST_FIELDS}: key ที่เป็นทุน / มูลค่าที่ทุน ในทุก response. */
+  public static final Set<String> COST_FIELDS =
+      Set.of("cost", "avgCost", "cogs", "unitCost", "totalCost", "balanceAvgCost", "balanceValue", "costIn", "costOut", "inCost",
+          "outCost");
 
   private CostVisibility() {}
 

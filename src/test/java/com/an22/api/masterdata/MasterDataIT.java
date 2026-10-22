@@ -41,7 +41,7 @@ class MasterDataIT extends ApiTest {
         .andExpect(jsonPath("$[2].code").value("IT-COM-NB"))
         .andExpect(jsonPath("$[2].parentId").value(2))
         .andExpect(jsonPath("$[2].level").value(3))
-        .andExpect(jsonPath("$[2].productCount").value(0));
+        .andExpect(jsonPath("$[2].productCount").value(1));
     mvc.perform(as(demo, get("/suppliers/2")))
         .andExpect(jsonPath("$.code").value("SUP-CPS")).andExpect(jsonPath("$.branchType").value("branch"))
         .andExpect(jsonPath("$.branchNo").value("00001")).andExpect(jsonPath("$.creditDays").value(60));

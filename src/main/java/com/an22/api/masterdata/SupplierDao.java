@@ -9,14 +9,16 @@ import java.util.Optional;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
-/** dt_suppliers ของบริษัทใน transaction — productCount = 0 จนกว่าจะมี products (ขั้น 5). */
+/** dt_suppliers ของบริษัทใน transaction — productCount = จำนวน SKU ที่ผูกผู้จำหน่ายนี้ (คำนวณตอนอ่าน). */
 @Repository
 public class SupplierDao {
 
   private static final String COLUMNS =
       "id, code, name, tax_id, branch_type, branch_no, address, contact_name, phone, email, credit_days, bank_name,"
           + " bank_account_no, bank_account_name, note, active";
-  private static final String SELECT = "SELECT " + COLUMNS + ", 0 AS product_count FROM dt_suppliers";
+  private static final String SELECT =
+      "SELECT " + COLUMNS + ", (SELECT count(DISTINCT l.product_id) FROM dt_product_suppliers l WHERE l.supplier_id = s.id)"
+          + " AS product_count FROM dt_suppliers s";
 
   private final JdbcClient jdbc;
 
@@ -25,11 +27,11 @@ public class SupplierDao {
   }
 
   public List<Supplier> list() {
-    return jdbc.sql(SELECT + " ORDER BY id").query(SupplierDao::row).list();
+    return jdbc.sql(SELECT + " ORDER BY s.id").query(SupplierDao::row).list();
   }
 
   public Optional<Supplier> find(long id) {
-    return jdbc.sql(SELECT + " WHERE id = :id").param("id", id).query(SupplierDao::row).optional();
+    return jdbc.sql(SELECT + " WHERE s.id = :id").param("id", id).query(SupplierDao::row).optional();
   }
 
   public long insert(Supplier s) {

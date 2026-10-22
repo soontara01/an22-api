@@ -8,11 +8,13 @@ import java.util.Optional;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
-/** dt_categories ของบริษัทใน transaction — productCount = 0 จนกว่าจะมี products (ขั้น 5). */
+/** dt_categories ของบริษัทใน transaction — productCount = จำนวน SKU ในหมวด (คำนวณตอนอ่าน). */
 @Repository
 public class CategoryDao {
 
-  private static final String SELECT = "SELECT id, code, name, parent_id, level, active, 0 AS product_count FROM dt_categories";
+  private static final String SELECT =
+      "SELECT c.id, c.code, c.name, c.parent_id, c.level, c.active,"
+          + " (SELECT count(*) FROM dt_products p WHERE p.category_id = c.id) AS product_count FROM dt_categories c";
 
   private final JdbcClient jdbc;
 
@@ -21,11 +23,11 @@ public class CategoryDao {
   }
 
   public List<Category> list() {
-    return jdbc.sql(SELECT + " ORDER BY id").query(CategoryDao::row).list();
+    return jdbc.sql(SELECT + " ORDER BY c.id").query(CategoryDao::row).list();
   }
 
   public Optional<Category> find(long id) {
-    return jdbc.sql(SELECT + " WHERE id = :id").param("id", id).query(CategoryDao::row).optional();
+    return jdbc.sql(SELECT + " WHERE c.id = :id").param("id", id).query(CategoryDao::row).optional();
   }
 
   public long insert(String code, String name, Long parentId, int level, boolean active) {
