@@ -559,10 +559,13 @@ api รันได้หลาย instance หลัง load balancer โดย
   - เจอระหว่างทดสอบ: DB ที่มี seed + image (ไม่มี `db/seed`) + `FLYWAY_MIGRATE=false` → validate ไม่ผ่าน (ถูกตามแบบ — production ไม่มี seed);
     stack ทดสอบ mount `db/seed` + `AN22_DB_LOCATIONS`
   - an22-web ใน compose: image สร้างจาก**สำเนา** repo web (ใน scratch) + dist หน้าบ้านที่ build ด้วย `useMock: false` ชั่วคราว (แก้ `environment.ts` แล้ว `git checkout` คืน — ไม่ commit)
-  - ทดลองกับหน้าบ้านจริงใน Chrome: login DEMO ผ่านหน้า login จริง → web → lb → api ได้, หน้า dashboard / POS / ตั้งค่า โหลดข้อมูลจาก api ครบ (console ไม่มี error);
-    **ตั้งเลขเครื่อง POS ในหน้า "ตั้งค่า" ไม่ได้ผ่าน Chrome ที่คุมด้วย extension** (dropdown ของ Angular Material ไม่เปิด — API ตอบรายการเครื่องครบ) จึงทดสอบ
-    flow ขาย / ปิดกะผ่าน web ด้วย curl แบบ Angular (cookie `an22.sid` + XSRF): login somchai → เปิดกะ → ขาย (ราคารวมโปร 10%) → ปิดกะ → logout → `/me` 401,
-    ไม่มี XSRF → 403 — ผ่านทั้งหมด; ให้ผู้ใช้ลอง dropdown ในเบราว์เซอร์เองอีกครั้ง
+  - ทดลองกับหน้าบ้านจริงใน Chrome (ทำซ้ำตามที่ผู้ใช้ขอ 2026-10-23): login DEMO (admin) → ตั้งค่า "เครื่องนี้" = เครื่อง 1 → POS เปิดกะ (เงินทอนเติมจาก
+    `/shifts/last-float`) → สแกน KB-020 (โปร 10% → ฿2,241) → ชำระเงินสด → บิล `POS-HQ-1-20261023-0006` → ปิดกะ (ตรวจยอดส่วนต่าง 0) → Z report — ผ่าน, console ไม่มี error
+    - รอบแรกดูเหมือน dropdown (mat-select) "ไม่เปิด" — **ไม่ใช่ bug** ของหน้าบ้าน / web / api: วัดด้วย MutationObserver + event log แล้ว คลิกจริงเปิด panel ได้ทุกครั้ง
+      (`aria-expanded=true`, panel อยู่ใน browser top layer ผ่าน Popover API ของ CDK); ที่พลาดมาจากวิธีทดสอบ: (1) เครื่องมืออ่านหน้าแบบ accessibility tree
+      ไม่เห็น option ใน top layer จึงรายงานว่าไม่มี (2) panel ที่เปิดอยู่มี backdrop โปร่งใสคลุมทั้งหน้า คลิกถัดไปจึงไปโดน backdrop = ปิด panel (ปกติของ Material)
+      และคลิกที่ตามมาเร็วระหว่าง backdrop กำลังหายก็ถูกกลืน (ทำซ้ำได้: กด "บันทึก" ทันทีหลังเลือก option ครั้งแรกไม่ติด) — คลิกแรกสุดของรอบแรกทำซ้ำไม่ได้อีก
+    - flow ผ่าน web ด้วย curl แบบ Angular (cookie `an22.sid` + XSRF) ก็ผ่าน: login somchai → เปิดกะ → ขาย → ปิดกะ → logout → `/me` 401, ไม่มี XSRF → 403
   - ตอบแล้ว 2026-10-23: แก้ docs ของหน้าบ้าน (README หัวข้อ api + next-steps-plan) → FrontEnd-An22 `3590bc3` branch `docs/c2-done` (ยังไม่ push)
 
 ## เรื่องที่ต้องถามผู้ใช้ระหว่างทาง (ไม่เดา)
