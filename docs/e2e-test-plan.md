@@ -1,6 +1,6 @@
 # แผนทดสอบ E2E — an22-api (ก่อน C3)
 
-สถานะ: รอผู้ใช้ review — รันทีละข้อตามที่ผู้ใช้สั่ง ("รันข้อ N"); ผลบันทึกใต้ข้อนั้น
+สถานะ: ผู้ใช้ review + อนุมัติแล้ว (2026-10-23) — รันทีละข้อตามที่ผู้ใช้สั่ง ("รันข้อ N"); ผลบันทึกใต้ข้อนั้น
 
 ## 1. สภาพแวดล้อม
 - **stack** `compose.multi.yaml` (project `an22-multi` — ไม่แตะ DB dev / project `an22-api`): postgres 18.6 + pgbouncer 1.25.2 (transaction pooling) +
@@ -60,6 +60,11 @@
 
 ### ข้อ 1 — `./mvnw verify` 1 รอบ
 - คาดหวัง: unit 225 / integration 167 ผ่านทั้งหมด, BUILD SUCCESS — บันทึกจำนวน + เวลา + commit (รันตอนไม่มี stack e2e เปิดอยู่)
+
+**ผล** 2026-10-23 · commit `e3202ef` · ✅ ผ่าน
+- ✅ unit (surefire) 225 ผ่าน, failures 0 / errors 0 / skipped 0
+- ✅ integration (failsafe) 167 ผ่าน, failures 0 / errors 0 / skipped 0
+- ✅ BUILD SUCCESS, Total time 03:40 min (เริ่ม 21:55 จบ 21:58 +07:00), ตอนรันไม่มี stack `an22-multi` เปิดอยู่
 
 ### ข้อ 2 — โครงพื้นฐาน 2 instance + load balancer
 | case | ทำอะไร | api คาดหวัง | DB คาดหวัง |
