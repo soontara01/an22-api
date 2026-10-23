@@ -26,6 +26,8 @@ import com.an22.api.rules.PosTerminalRules;
 import com.an22.api.rules.PriceRules;
 import com.an22.api.rules.ShiftRules;
 import com.an22.api.rules.UserRules;
+import com.an22.api.sale.CreditNoteDao;
+import com.an22.api.sale.ExchangeDao;
 import com.an22.api.sale.SaleDao;
 import com.an22.api.web.ApiException;
 import com.an22.api.web.BranchContext;
@@ -39,7 +41,7 @@ import org.springframework.transaction.annotation.Transactional;
 /**
  * กะขาย (docs/shift-plan.md) + ล็อกหน้าจอ POS (E48) — กฎตาม {@code handleShifts} ของ mock, ทุกกฎจาก {@link ShiftRules}. เครื่อง = {@code X-Terminal-Id}.
  * เปิดกะใต้ล็อก "shifts" (+ partial unique 1 กะเปิดต่อเครื่อง / ต่อคน); เขียนกะเดิมล็อกแถวกะก่อน.
- * <p>ยอดระบบ (expectedByMethod) = เงินทอนตั้งต้น + บิลที่ขาย / void ในกะ + เงินเข้าออก — ใบลดหนี้ / ใบเปลี่ยนเข้ามาในขั้น 10 ({@link #context}).
+ * <p>ยอดระบบ (expectedByMethod) = เงินทอนตั้งต้น + บิลที่ขาย / void ในกะ − คืนเงินของใบลดหนี้ + เงินเข้าออก ({@link #context}).
  */
 @Service
 public class ShiftService {
@@ -61,10 +63,14 @@ public class ShiftService {
   private final Audit audit;
   private final Clock clock;
   private final SaleDao sales;
+  private final CreditNoteDao creditNotes;
+  private final ExchangeDao exchanges;
 
   ShiftService(ShiftDao dao, PosTerminalDao terminals, BranchDao branches, PaymentMethodDao methods, CompanyInfoDao company,
-      DocNumbers numbers, TenantLocks locks, AuthService auth, Audit audit, Clock clock, SaleDao sales) {
+      DocNumbers numbers, TenantLocks locks, AuthService auth, Audit audit, Clock clock, SaleDao sales, CreditNoteDao creditNotes, ExchangeDao exchanges) {
     this.sales = sales;
+    this.creditNotes = creditNotes;
+    this.exchanges = exchanges;
     this.dao = dao;
     this.terminals = terminals;
     this.branches = branches;
@@ -295,12 +301,12 @@ public class ShiftService {
 
   // ---------- ภายใน ----------
 
-  /** ทุกสิ่งที่เดินเงินในกะ: บิลที่ขาย / void ในกะ + เงินเข้าออก — ใบลดหนี้ / ใบเปลี่ยนเติมในขั้น 10. */
+  /** ทุกสิ่งที่เดินเงิน (หรือของ) ในกะ: บิลที่ขาย / void, ใบลดหนี้, ใบเปลี่ยน, เงินเข้าออก, เปิดลิ้นชัก. */
   private ShiftRules.ShiftContext context(long shiftId) {
     List<ShiftRules.MovementRef> moves = dao.movements(shiftId).stream()
         .map(m -> new ShiftRules.MovementRef(m.shiftId(), m.type(), m.amount())).toList();
-    return new ShiftRules.ShiftContext(sales.shiftRefs(shiftId), List.of(), moves, methods.list(), List.of(),
-        dao.drawerOpenShiftIds(List.of(shiftId)));
+    return new ShiftRules.ShiftContext(sales.shiftRefs(shiftId), creditNotes.shiftRefs(shiftId), moves, methods.list(),
+        exchanges.shiftIds(shiftId), dao.drawerOpenShiftIds(List.of(shiftId)));
   }
 
   private List<ShiftDao.Stored> shifts(ShopSession s, BranchContext ctx, String from, String to, String branchParam, boolean openOnly) {

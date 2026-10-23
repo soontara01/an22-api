@@ -11,6 +11,7 @@ import com.an22.api.masterdata.PaymentMethodDao;
 import com.an22.api.model.Branch;
 import com.an22.api.model.CartItem;
 import com.an22.api.model.CompanyInfo;
+import com.an22.api.model.Exchange;
 import com.an22.api.model.PaymentMethod;
 import com.an22.api.model.PosTerminal;
 import com.an22.api.model.Product;
@@ -18,7 +19,6 @@ import com.an22.api.model.Promotion;
 import com.an22.api.model.Sale;
 import com.an22.api.model.SaleLine;
 import com.an22.api.model.SalePayload;
-import com.an22.api.model.SerialNumber;
 import com.an22.api.model.TaxInvoiceBuyer;
 import com.an22.api.model.User;
 import com.an22.api.pos.PosTerminalDao;
@@ -31,14 +31,11 @@ import com.an22.api.rules.PosPayment;
 import com.an22.api.rules.PosPricing;
 import com.an22.api.rules.PosTerminalRules;
 import com.an22.api.rules.PriceRules;
-import com.an22.api.rules.ProductRules;
 import com.an22.api.rules.SaleRules;
 import com.an22.api.rules.ShiftRules;
 import com.an22.api.rules.TaxInvoiceRules;
 import com.an22.api.rules.UserRules;
 import com.an22.api.shift.ShiftDao;
-import com.an22.api.stock.SerialDao;
-import com.an22.api.stock.StockLedger;
 import com.an22.api.web.ApiException;
 import com.an22.api.web.BranchContext;
 import java.time.Clock;
@@ -55,7 +52,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 /**
  * บิลขาย POS — {@code POST /sales} ตรวจตามลำดับ 1–8 ใน api-contract.md (ไม่เปลี่ยนอะไรจนผ่านหมด) แล้วออกเลข, ตัดสต็อกพร้อม COGS (serial =
- * ทุนของเครื่อง, อื่น = ทุนเฉลี่ยขณะนั้น, บริการ = ทุนมาตรฐาน) ผ่าน {@link StockLedger} เรียงตาม productId; ยกเลิกบิล (วันเดียวกัน, สาขาที่ขาย,
+ * ทุนของเครื่อง, อื่น = ทุนเฉลี่ยขณะนั้น, บริการ = ทุนมาตรฐาน) ผ่าน {@link SaleStock} เรียงตาม productId; ยกเลิกบิล (วันเดียวกัน, สาขาที่ขาย,
  * ไม่ใช่ admin ต้องมี login ของ admin) คืนสต็อกที่ COGS ของบรรทัด.
  */
 @Service
@@ -77,8 +74,8 @@ public class SaleService {
   private final PosTerminalDao terminals;
   private final BranchDao branches;
   private final ShiftDao shifts;
-  private final SerialDao serials;
-  private final StockLedger ledger;
+  private final SaleStock stock;
+  private final ExchangeDao exchanges;
   private final CompanyInfoDao company;
   private final DocNumbers numbers;
   private final AuthService auth;
@@ -86,8 +83,8 @@ public class SaleService {
   private final Clock clock;
 
   SaleService(SaleDao dao, TaxInvoiceService invoices, ProductDao products, PriceDao prices, PromotionDao promotions,
-      CategoryDao categories, PaymentMethodDao methods, PosTerminalDao terminals, BranchDao branches, ShiftDao shifts, SerialDao serials,
-      StockLedger ledger, CompanyInfoDao company, DocNumbers numbers, AuthService auth, Audit audit, Clock clock) {
+      CategoryDao categories, PaymentMethodDao methods, PosTerminalDao terminals, BranchDao branches, ShiftDao shifts, SaleStock stock,
+      ExchangeDao exchanges, CompanyInfoDao company, DocNumbers numbers, AuthService auth, Audit audit, Clock clock) {
     this.dao = dao;
     this.invoices = invoices;
     this.products = products;
@@ -98,8 +95,8 @@ public class SaleService {
     this.terminals = terminals;
     this.branches = branches;
     this.shifts = shifts;
-    this.serials = serials;
-    this.ledger = ledger;
+    this.stock = stock;
+    this.exchanges = exchanges;
     this.company = company;
     this.numbers = numbers;
     this.auth = auth;
@@ -136,7 +133,7 @@ public class SaleService {
     // 5. serial ต้องอยู่ในคลังของสาขานี้
     for (PosPricing.PricedLine line : cart.lines()) {
       if (line.serial() != null && !line.serial().isEmpty()) {
-        badRequest(serialHereProblem(line.serial(), line.productId(), line.sku(), branch, all, "ขาย"));
+        badRequest(stock.serialHereProblem(line.serial(), line.productId(), line.sku(), branch, all, "ขาย"));
       }
     }
     // 6. ยอดต้องตรงกับที่หน้าจอเห็น
@@ -248,31 +245,23 @@ public class SaleService {
     badRequest(SaleRules.voidError(sale.status(), sale.date(), sale.branchId(), reason, LocalDate.now(clock).toString(), branch, all));
     Integer terminal = terminalId == null || terminalId > Integer.MAX_VALUE ? null : terminalId.intValue();
     Long voidShiftId = moneyShift(s, company.get(), shifts.openOfTerminal(terminal), "void");
-    for (SaleLine line : sale.lines()) {
+    // ใบเปลี่ยนวันเดียวกันสลับ serial ไปแล้ว: ลูกค้าคืนเครื่องที่ถืออยู่ตอนนี้
+    List<Exchange> swaps = exchanges.ofSale(id);
+    for (int i = 0; i < sale.lines().size(); i++) {
+      SaleLine line = sale.lines().get(i);
       if (products.sku(line.productId()).isEmpty()) {
         throw ApiException.badRequest("ไม่พบ SKU " + line.sku() + " คืนสต็อกไม่ได้");
       }
-      if (line.serial() != null) {
-        Optional<SerialNumber> unit = serials.find(line.serial());
-        if (unit.isEmpty() || unit.get().productId() != line.productId() || !"sold".equals(unit.get().status())) {
-          throw ApiException.badRequest("ซีเรียล " + line.serial() + " ไม่อยู่ในสถานะขายแล้ว คืนสต็อกไม่ได้");
-        }
+      String serial = SaleRules.currentSerial(sale.lines(), i, swaps);
+      if (serial != null && !stock.isSold(serial, line.productId())) {
+        throw ApiException.badRequest("ซีเรียล " + serial + " ไม่อยู่ในสถานะขายแล้ว คืนสต็อกไม่ได้");
       }
     }
     String note = "ยกเลิกบิล " + sale.orderNo();
-    for (SaleLine line : byProduct(sale.lines())) {
-      if (ProductRules.isService(line.itemType())) {
-        continue;
-      }
-      int baseQty = line.qty() * line.factor();
-      if (line.serial() != null) {
-        ledger.lock(branch, line.productId());
-        double cost = serials.find(line.serial()).orElseThrow().cost();
-        serials.returnSold(line.serial(), line.productId(), branch, note);
-        ledger.recordSerials(branch, line.productId(), "receive", 1, cost, cost, List.of(line.serial()), note);
-        continue;
-      }
-      ledger.receive(branch, line.productId(), baseQty, line.cogs() / baseQty, "receive", note);
+    for (int i : byProduct(sale.lines())) {
+      SaleLine line = sale.lines().get(i);
+      stock.putBack(branch, line.productId(), line.itemType(), line.qty() * line.factor(), line.cogs(),
+          SaleRules.currentSerial(sale.lines(), i, swaps), true, note, note);
     }
     dao.voided(id, reason, voidShiftId, s.user().name(), approver);
     invoices.cancelForVoid(id, reason);
@@ -332,43 +321,21 @@ public class SaleService {
     for (int i : order) {
       PosPricing.PricedLine line = lines.get(i);
       Product product = byId.get(line.productId());
-      int baseQty = (int) (line.qty() * line.factor());
       String note = (line.freeOfPromotionId() != null ? "ของแถม " : "ขาย ") + orderNo;
-      if (ProductRules.isService(product.itemType())) {
-        cogs[i] = Money.round2(product.cost() * baseQty);
-      } else if (line.serial() != null) {
-        ledger.lock(branch, product.id());
-        double cost = serials.find(line.serial()).orElseThrow().cost();
-        if (serials.takeOut(List.of(line.serial()), product.id(), branch, "sold", note) != 1) {
-          throw ApiException.badRequest("ซีเรียล " + line.serial() + " ไม่อยู่ในคลังของ " + line.sku());
-        }
-        ledger.recordSerials(branch, product.id(), "issue", -1, cost, -cost, List.of(line.serial()), note);
-        cogs[i] = Money.round2(cost);
-      } else {
-        cogs[i] = ledger.issue(branch, product.id(), baseQty, "issue", note).cogs();
-      }
+      cogs[i] = stock.issue(branch, product.id(), line.sku(), product.itemType(), product.cost(), (int) (line.qty() * line.factor()),
+          line.serial(), note);
     }
     return cogs;
   }
 
   /** {@code moneyShift()}: ระบบกะเปิด → กะเปิดของเครื่องนี้ + {@code shiftBlocker()}; คืน id ของกะ (ปิดระบบกะ = null). */
-  private static Long moneyShift(ShopSession s, CompanyInfo info, Optional<ShiftDao.Stored> open, String action) {
+  static Long moneyShift(ShopSession s, CompanyInfo info, Optional<ShiftDao.Stored> open, String action) {
     if (!Boolean.TRUE.equals(info.requireShift())) {
       return null;
     }
     ShiftRules.ShiftRef ref = open.map(o -> new ShiftRules.ShiftRef(o.shift().status(), o.cashierId(), o.shift().cashier())).orElse(null);
     badRequest(ShiftRules.shiftBlocker(action, true, ref, s.user().id(), UserRules.hasAdminRights(s.user().role())));
     return open.map(o -> o.shift().id()).orElse(null);
-  }
-
-  /** {@code serialHereProblem()} (E16): serial ต้องอยู่ในคลังของ SKU นั้นที่สาขานี้. */
-  private String serialHereProblem(String serial, long productId, String sku, long branch, List<Branch> all, String what) {
-    Optional<SerialNumber> unit = serials.find(serial);
-    if (unit.isEmpty() || unit.get().productId() != productId || !"in_stock".equals(unit.get().status())) {
-      return "ซีเรียล " + serial + " ไม่อยู่ในคลังของ " + sku;
-    }
-    return unit.get().branchId() == branch ? null
-        : "ซีเรียล " + serial + " อยู่ที่สาขา " + code(all, unit.get().branchId()) + " — " + what + "ที่สาขานี้ไม่ได้";
   }
 
   /**
@@ -387,8 +354,14 @@ public class SaleService {
     return "all".equals(scope) ? null : (Long) scope;
   }
 
-  private static List<SaleLine> byProduct(List<SaleLine> lines) {
-    return lines.stream().sorted(Comparator.comparingLong(SaleLine::productId)).toList();
+  /** index ของบรรทัดเรียงตาม productId (เดินสต็อกเรียงกัน — กัน deadlock). */
+  static List<Integer> byProduct(List<SaleLine> lines) {
+    List<Integer> order = new ArrayList<>();
+    for (int i = 0; i < lines.size(); i++) {
+      order.add(i);
+    }
+    order.sort(Comparator.comparingLong(i -> lines.get(i).productId()));
+    return order;
   }
 
   private static Product withPrice(Product p, Double price) {
@@ -405,7 +378,7 @@ public class SaleService {
     return all.stream().filter(b -> b.id() == branchId).map(Branch::code).findFirst().orElse(Long.toString(branchId));
   }
 
-  private static Long positive(String value) {
+  static Long positive(String value) {
     try {
       long n = Long.parseLong(value == null ? "" : value.strip());
       return n > 0 ? n : null;

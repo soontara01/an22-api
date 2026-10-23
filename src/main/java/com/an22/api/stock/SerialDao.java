@@ -102,6 +102,15 @@ public class SerialDao {
         .update();
   }
 
+  /** serial ที่ขายแล้วถูกตัดเสียที่สาขานี้ (รับคืนแต่ไม่เข้าคลัง) — คืนจำนวนแถวที่เปลี่ยน. */
+  public int writeOffSold(String serial, long productId, long branchId, String note) {
+    return jdbc.sql(
+            "UPDATE dt_serial_numbers SET branch_id = :branch, status = 'damaged', removed_at = now(), note = :note"
+                + " WHERE serial = :serial AND product_id = :product AND status = 'sold'")
+        .param("branch", branchId).param("note", note).param("serial", serial).param("product", productId)
+        .update();
+  }
+
   /** ทุนของ serial ที่อยู่ในคลังของสาขานี้ (ใช้คิดสต็อก / ทุนเฉลี่ยของ SKU serial). */
   public List<Double> inStockCosts(long productId, long branchId) {
     return jdbc.sql("SELECT cost FROM dt_serial_numbers WHERE product_id = :product AND branch_id = :branch AND status = 'in_stock'"

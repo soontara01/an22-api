@@ -1,6 +1,8 @@
 package com.an22.api.sale;
 
 import com.an22.api.auth.ShopSession;
+import com.an22.api.model.CreditNote;
+import com.an22.api.model.Exchange;
 import com.an22.api.model.Sale;
 import com.an22.api.model.SalePayload;
 import com.an22.api.model.TaxInvoice;
@@ -22,7 +24,8 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * {@code /sales}, ใบกำกับภาษีของบิล และ {@code /tax-invoices} — admin เท่านั้น: ออกใบใหม่แทนใบเดิม, รายงานภาษีขาย (adminOnlyError ของ mock ก่อน 404);
+ * {@code /sales}, ใบกำกับภาษีของบิล, {@code /tax-invoices}, ใบลดหนี้ ({@code /credit-notes}) และใบเปลี่ยน — admin เท่านั้น: ออกใบกำกับใหม่แทนใบเดิม,
+ * รายงานภาษีขาย, ออกใบลดหนี้ (adminOnlyError ของ mock ก่อน 404);
  * void ของคนที่ไม่ใช่ admin ต้องมีผู้อนุมัติ (service ตรวจหลัง 404 ตาม mock).
  */
 @RestController
@@ -30,13 +33,48 @@ public class SaleController {
 
   static final String REISSUE_ADMIN = "ยกเลิกและออกใบกำกับภาษีใหม่ได้เฉพาะผู้ดูแลระบบ";
   static final String REPORT_ADMIN = "ดูรายงานภาษีขายได้เฉพาะผู้ดูแลระบบ";
+  static final String CREDIT_NOTE_ADMIN = "ออกใบลดหนี้ได้เฉพาะผู้ดูแลระบบ";
 
   private final SaleService sales;
   private final TaxInvoiceService invoices;
+  private final CreditNoteService creditNotes;
+  private final ExchangeService exchanges;
 
-  SaleController(SaleService sales, TaxInvoiceService invoices) {
+  SaleController(SaleService sales, TaxInvoiceService invoices, CreditNoteService creditNotes, ExchangeService exchanges) {
     this.sales = sales;
     this.invoices = invoices;
+    this.creditNotes = creditNotes;
+    this.exchanges = exchanges;
+  }
+
+  @GetMapping("/sales/{id}/credit-notes")
+  List<CreditNote> creditNotesOf(ShopSession s, @PathVariable long id) {
+    return creditNotes.ofSale(s, id);
+  }
+
+  @PostMapping("/sales/{id}/credit-notes")
+  CreditNote createCreditNote(ShopSession s, BranchContext ctx, TerminalContext terminal, @PathVariable long id,
+      @RequestBody CreditNote.Payload body) {
+    Permissions.requireAdmin(s, CREDIT_NOTE_ADMIN);
+    return creditNotes.create(s, ctx, terminal.terminalId(), id, body);
+  }
+
+  @GetMapping("/credit-notes")
+  List<CreditNote> creditNotes(ShopSession s, BranchContext ctx, @RequestParam(required = false) String from,
+      @RequestParam(required = false) String to, @RequestParam(required = false) String shiftId,
+      @RequestParam(required = false) String branchId) {
+    return creditNotes.list(s, ctx, from, to, shiftId, branchId);
+  }
+
+  @GetMapping("/sales/{id}/exchanges")
+  List<Exchange> exchangesOf(@PathVariable long id) {
+    return exchanges.ofSale(id);
+  }
+
+  @PostMapping("/sales/{id}/exchanges")
+  Exchange createExchange(ShopSession s, BranchContext ctx, TerminalContext terminal, @PathVariable long id,
+      @RequestBody Exchange.Payload body) {
+    return exchanges.create(s, ctx, terminal.terminalId(), id, body);
   }
 
   @GetMapping("/sales")

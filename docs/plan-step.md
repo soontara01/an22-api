@@ -1,6 +1,6 @@
 # แผนทำ an22-api (C2) — ทีละขั้นย่อย
 
-สถานะ: ขั้น 9 เสร็จ 2026-10-23 — รอผู้ใช้ก่อนเริ่มขั้น 10
+สถานะ: ขั้น 10 เสร็จ 2026-10-23 — รอผู้ใช้ก่อนเริ่มขั้น 11
 
 ## บริบท
 
@@ -475,10 +475,21 @@ api รันได้หลาย instance หลัง load balancer โดย
   - ยอดระบบของกะรวมบิลที่ขาย / void ในกะแล้ว (`SaleDao.shiftRefs`); ลบ SKU ที่เคยขาย / ช่องทางที่ใช้แล้ว / เครื่องที่มีบิล → 400
   - returnStatus / creditedTotal / creditNoteNos / exchangeNos ยังตอบค่าว่าง และ `currentSerial()` ยังไม่ดูใบเปลี่ยน — ขั้น 10
 
-### ขั้น 10 — ใบลดหนี้ + ใบเปลี่ยน
+### ขั้น 10 — ใบลดหนี้ + ใบเปลี่ยน ✅ เสร็จ 2026-10-23
 - migration: `credit_notes` (`buyer_enc` เหมือนใบกำกับ; + lines / deductions / refunds), `exchanges` (+ lines); กฎ `CreditNoteRules` (`draftCreditNote`, …), `ExchangeRules`
 - endpoint: `/sales/:id/credit-notes`, `/credit-notes`, `/sales/:id/exchanges`; field derived ของ `Sale` (`returnStatus`, `creditedTotal`, `creditNoteNos`, `exchangeNos`); audit `credit_note`
 - **ถามผู้ใช้**: ควรขอให้หน้าบ้านเพิ่ม `credit-note.json` ใน fixtures ก่อน (README ของ fixtures แนะนำไว้) หรือไม่
+- ผลที่ทำ (รายละเอียดที่แผนไม่ได้ระบุ):
+  - ตอบแล้ว: เพิ่ม fixtures ก่อน + (ถามเพิ่ม) ตรวจเลขบัตรเต็มใน reference ของการคืนเงินด้วย → FrontEnd-An22 `cdb0be7` branch `docs/credit-note-fixtures`
+    (ยังไม่ push): `credit-note.json` 27 เคส (draft / error / refundOptions / toRefunds / returnSummary), `creditNoteError()` + spec, README fixtures
+  - FixturesTest ผ่านครบ 86 เคส (price-cart 35, payment 24, credit-note 27) ตั้งแต่รอบแรก
+  - V9: `dt_credit_notes` (+ lines / deductions / refunds) และ `dt_exchanges` (+ lines) — append-only ทั้งใบ; ผู้ซื้อของใบลดหนี้ = ของใบกำกับตอนออก
+    เข้ารหัส (AAD `dt_credit_notes.buyer:<tenant>`)
+  - `rules/CreditNoteRules`, `rules/ExchangeRules`, `SaleRules.currentSerial`; `sale/SaleStock` = การเดินสต็อกต่อบรรทัดของ บิล / void / ใบลดหนี้ /
+    ใบเปลี่ยน (ขาย, คืนเข้าคลังที่ COGS, ตัดเสีย serial)
+  - field derived ของ Sale (returnStatus / creditedTotal / creditNoteNos / exchangeNos) คำนวณใน `SaleDao` ทุกครั้งที่อ่าน; void คืน serial ที่ลูกค้าถืออยู่
+  - ยอดระบบของกะรวมการคืนเงินของใบลดหนี้ + นับใบเปลี่ยน; ลบเครื่องที่มีใบลดหนี้ / ใบเปลี่ยน → 400
+  - ใบเปลี่ยนไม่มี audit (เหมือน mock)
 
 ### ขั้น 11 — ส่วน SaaS ของบริษัท
 - `GET /audit-log` (`AuditRules.filterAuditEvents`, `parseAuditQuery`), `GET /company/onboarding`, `GET /company/subscription`, `PUT /company/plan`
@@ -506,7 +517,7 @@ api รันได้หลาย instance หลัง load balancer โดย
 
 1. ~~ขั้น 2: จำกัด login ผิดต่อบัญชี / IP~~ — ตอบแล้ว 2026-10-22 (ขั้น 2)
 2. ~~ขั้น 5: ทุนเฉลี่ย~~ — ตอบแล้ว 2026-10-22: `numeric(14,4)`
-3. ขั้น 10: เพิ่ม fixtures `credit-note.json` ฝั่งหน้าบ้านก่อนหรือไม่
+3. ~~ขั้น 10: เพิ่ม fixtures `credit-note.json` ฝั่งหน้าบ้านก่อนหรือไม่~~ — ตอบแล้ว 2026-10-23: เพิ่มก่อน (golden-fixtures.ts ของหน้าบ้าน)
 4. ขั้น 12: `GET /platform/outbox` ไม่มีใน api จริง — หน้า platform ต้องซ่อนเมนูนี้เมื่อไม่ใช่ mock หรือไม่
 5. ~~ขั้น 9: ข้อความ error เมื่อ `reference` เป็นเลขบัตรเต็ม~~ — ตอบแล้ว 2026-10-23: "<ช่องทาง>: ห้ามกรอกเลขบัตรเต็ม — กรอกเฉพาะเลขอนุมัติหรือเลขบัตร 4 หลักท้าย" ใน `paymentError()` (หน้าบ้าน + server ใช้กฎเดียวกัน, เพิ่มเคสใน fixtures)
 6. ก่อนขั้น 8: ข้อความ error + ตัวเลข (ช่วงวันที่สูงสุด, `MAX_LIST_ROWS`, `statement_timeout`) ของการจำกัดขนาดคำตอบ (แก้ spec หน้าบ้านก่อน)

@@ -5,6 +5,8 @@ import com.an22.api.auth.ShopSession;
 import com.an22.api.branch.BranchDao;
 import com.an22.api.company.PlanLimits;
 import com.an22.api.db.TenantLocks;
+import com.an22.api.sale.CreditNoteDao;
+import com.an22.api.sale.ExchangeDao;
 import com.an22.api.sale.SaleDao;
 import com.an22.api.shift.ShiftDao;
 import com.an22.api.model.Branch;
@@ -19,7 +21,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 /**
  * ทะเบียนเครื่อง POS (T1 / T5 / E8) — เขียน: admin บริษัท หรือ admin ของสาขาของเครื่อง (ย้ายสาขาต้องมีสิทธิ์ทั้งสองสาขา). ปิดเครื่องที่มีกะเปิด /
- * ลบเครื่องที่มีกะ → 400 (เอกสารการขายเติมในขั้น 9).
+ * ลบเครื่องที่มีกะหรือเอกสาร → 400.
  */
 @Service
 public class PosTerminalService {
@@ -35,10 +37,14 @@ public class PosTerminalService {
 
   private final ShiftDao shifts;
   private final SaleDao sales;
+  private final CreditNoteDao creditNotes;
+  private final ExchangeDao exchanges;
 
   PosTerminalService(PosTerminalDao dao, BranchDao branches, TenantLocks locks, PlanLimits limits, Audit audit, ShiftDao shifts,
-      SaleDao sales) {
+      SaleDao sales, CreditNoteDao creditNotes, ExchangeDao exchanges) {
     this.sales = sales;
+    this.creditNotes = creditNotes;
+    this.exchanges = exchanges;
     this.shifts = shifts;
     this.dao = dao;
     this.branches = branches;
@@ -96,8 +102,8 @@ public class PosTerminalService {
     if (notMine(s, branches.list(), current.branchId())) {
       throw ApiException.forbidden(BRANCH_ONLY);
     }
-    // มีกะ / บิล (ขั้น 10: + ใบลดหนี้ / ใบเปลี่ยน) = เอกสารอ้างอยู่
-    if (shifts.terminalUsed(id) || sales.terminalUsed(id)) {
+    // มีกะ / บิล / ใบลดหนี้ / ใบเปลี่ยน = เอกสารอ้างอยู่
+    if (shifts.terminalUsed(id) || sales.terminalUsed(id) || creditNotes.terminalUsed(id) || exchanges.terminalUsed(id)) {
       throw ApiException.badRequest("เครื่อง " + id + " มีกะหรือเอกสารแล้ว ลบไม่ได้ (ปิดใช้งานแทน)");
     }
     dao.delete(id);

@@ -3,6 +3,7 @@ package com.an22.api.sale;
 import com.an22.api.model.Sale;
 import com.an22.api.model.SaleLine;
 import com.an22.api.model.SalePayment;
+import com.an22.api.rules.Money;
 import com.an22.api.rules.ShiftRules;
 import java.math.BigDecimal;
 import java.sql.ResultSet;
@@ -21,7 +22,7 @@ import org.springframework.stereotype.Repository;
 
 /**
  * dt_sales + บรรทัด + การชำระ ของบริษัทใน transaction — เอกสาร: ไม่ลบ, บรรทัด / การชำระไม่เปลี่ยน. returnStatus / creditedTotal /
- * creditNoteNos / exchangeNos ตอบค่าว่าง (ใบลดหนี้ / ใบเปลี่ยนมาในขั้น 10).
+ * creditNoteNos / exchangeNos คำนวณจากใบลดหนี้ / ใบเปลี่ยนทุกครั้งที่อ่าน ({@code returnSummary()} / {@code exchangeNos()}).
  */
 @Repository
 public class SaleDao {
@@ -208,12 +209,47 @@ public class SaleDao {
               rs.getLong("method_id"), rs.getString("name"), rs.getString("type"), dbl(rs, "amount"), dbl(rs, "tendered"),
               rs.getString("reference"), installmentMonths));
         });
-    return sales.stream().map(s -> new Sale(s.id(), s.orderNo(), s.date(), s.cashier(), s.customer(),
-        List.copyOf(lines.getOrDefault(s.id(), List.of())), List.copyOf(payments.getOrDefault(s.id(), List.of())), s.subtotal(),
+    // ใบลดหนี้ (เก่าก่อน) + หน่วยที่คืนแล้วต่อบรรทัด + ใบเปลี่ยน
+    Map<Long, List<String>> noteNos = new HashMap<>();
+    Map<Long, Double> credited = new HashMap<>();
+    jdbc.sql("SELECT sale_id, cn_no, total FROM dt_credit_notes WHERE sale_id = ANY (:ids) ORDER BY date, id")
+        .param("ids", ids)
+        .query((ResultSet rs) -> {
+          noteNos.computeIfAbsent(rs.getLong("sale_id"), k -> new ArrayList<>()).add(rs.getString("cn_no"));
+          credited.merge(rs.getLong("sale_id"), rs.getBigDecimal("total").doubleValue(), Double::sum);
+        });
+    Map<Long, Map<Integer, Integer>> returned = new HashMap<>();
+    jdbc.sql("SELECT n.sale_id, l.sale_line_index, sum(l.qty) AS qty FROM dt_credit_note_lines l"
+            + " JOIN dt_credit_notes n ON n.id = l.credit_note_id WHERE n.sale_id = ANY (:ids) GROUP BY n.sale_id, l.sale_line_index")
+        .param("ids", ids)
+        .query((ResultSet rs) -> {
+          returned.computeIfAbsent(rs.getLong("sale_id"), k -> new HashMap<>()).put(rs.getInt("sale_line_index"), rs.getInt("qty"));
+        });
+    Map<Long, List<String>> exchangeNos = new HashMap<>();
+    jdbc.sql("SELECT sale_id, ex_no FROM dt_exchanges WHERE sale_id = ANY (:ids) ORDER BY date, id")
+        .param("ids", ids)
+        .query((ResultSet rs) -> {
+          exchangeNos.computeIfAbsent(rs.getLong("sale_id"), k -> new ArrayList<>()).add(rs.getString("ex_no"));
+        });
+    return sales.stream().map(s -> {
+      List<SaleLine> own = List.copyOf(lines.getOrDefault(s.id(), List.of()));
+      List<String> notes = List.copyOf(noteNos.getOrDefault(s.id(), List.of()));
+      Map<Integer, Integer> back = returned.getOrDefault(s.id(), Map.of());
+      boolean full = true;
+      for (int i = 0; i < own.size(); i++) {
+        if (back.getOrDefault(i, 0) < own.get(i).qty()) {
+          full = false;
+        }
+      }
+      String returnStatus = notes.isEmpty() ? "none" : full ? "full" : "partial";
+      return new Sale(s.id(), s.orderNo(), s.date(), s.cashier(), s.customer(),
+        own, List.copyOf(payments.getOrDefault(s.id(), List.of())), s.subtotal(),
         s.itemDiscount(), s.billDiscount(), s.total(), s.vat(), s.rounding(), s.change(), s.billPromotionIds(), s.itemCount(), s.status(),
-        s.voidedAt(), s.voidReason(), s.taxInvoiceNo(), s.returnStatus(), s.creditedTotal(), s.creditNoteNos(), s.exchangeNos(),
+        s.voidedAt(), s.voidReason(), s.taxInvoiceNo(), returnStatus, Money.round2(credited.getOrDefault(s.id(), 0.0)), notes,
+        List.copyOf(exchangeNos.getOrDefault(s.id(), List.of())),
         s.manualDiscount(), s.manualDiscountReason(), s.manualDiscountBy(), s.shiftId(), s.voidShiftId(), s.voidedBy(),
-        s.voidApprovedBy(), s.branchId(), s.terminalId(), s.posId(), s.vatRegistered())).toList();
+        s.voidApprovedBy(), s.branchId(), s.terminalId(), s.posId(), s.vatRegistered());
+    }).toList();
   }
 
   private static Sale row(ResultSet rs, int i) throws SQLException {

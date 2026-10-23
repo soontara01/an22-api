@@ -3,15 +3,21 @@ package com.an22.api.rules;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.fail;
 
+import com.an22.api.model.Branch;
 import com.an22.api.model.CartItem;
+import com.an22.api.model.CreditNote;
+import com.an22.api.model.Exchange;
 import com.an22.api.model.FreeSerial;
 import com.an22.api.model.ManualDiscount;
 import com.an22.api.model.PaymentInput;
 import com.an22.api.model.PaymentMethod;
+import com.an22.api.model.Promotion;
+import com.an22.api.model.Sale;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.DynamicTest;
@@ -36,6 +42,21 @@ class FixturesTest {
       ManualRule manualDiscountRule) {}
 
   record PriceCartCase(String name, PriceCartInput input, JsonNode expected) {}
+
+  /** {@code BranchHere} ของ fixture: สาขามีแค่ id + code. */
+  record BranchHere(Long branchId, List<BranchCode> branches) {
+    List<Branch> asBranches() {
+      return branches.stream().map(b -> new Branch(b.id(), b.code(), "", "", "", "", "", true)).toList();
+    }
+  }
+
+  record BranchCode(long id, String code) {}
+
+  record CreditNoteInput(
+      Sale sale, List<CreditNote> notes, CreditNote.Payload payload, List<Promotion> promotions, List<PaymentMethod> methods,
+      String today, List<Exchange> exchanges, BranchHere here) {}
+
+  record CreditNoteCase(String name, CreditNoteInput input, JsonNode expected) {}
 
   record PaymentCaseInput(double total, List<PaymentInput> payments, List<PaymentMethod> methods) {}
 
@@ -63,6 +84,33 @@ class FixturesTest {
       assertSame(c.expected().get("summary"), JSON.valueToTree(PosPayment.paymentSummary(in.total(), in.payments(), in.methods())),
           "summary");
       assertThat(PosPayment.paymentError(in.total(), in.payments(), in.methods())).isEqualTo(text(c.expected().get("error")));
+    }));
+  }
+
+  @TestFactory
+  Stream<DynamicTest> creditNoteMatchesFrontEnd() throws Exception {
+    List<CreditNoteCase> cases = read("credit-note.json", new TypeReference<>() {});
+    return cases.stream().map(c -> DynamicTest.dynamicTest(c.name(), () -> {
+      CreditNoteInput in = c.input();
+      assertSame(c.expected().get("draft"),
+          JSON.valueToTree(CreditNoteRules.draftCreditNote(in.sale(), in.notes(), in.payload().lines(), in.promotions(), in.exchanges())),
+          "draft");
+      BranchHere here = in.here();
+      assertThat(CreditNoteRules.creditNoteError(in.sale(), in.notes(), in.payload(), in.promotions(), in.methods(), in.today(),
+          in.exchanges(), here == null ? null : here.branchId(), here == null ? List.of() : here.asBranches()))
+          .isEqualTo(text(c.expected().get("error")));
+      List<Map<String, Object>> options = CreditNoteRules.refundOptions(in.sale(), in.notes(), in.methods()).stream()
+          .map(o -> {
+            Map<String, Object> m = new java.util.HashMap<>();
+            m.put("methodId", o.method().id());
+            m.put("max", o.max());
+            return m;
+          })
+          .toList();
+      assertSame(c.expected().get("refundOptions"), JSON.valueToTree(options), "refundOptions");
+      assertSame(c.expected().get("refunds"), JSON.valueToTree(CreditNoteRules.toRefunds(in.payload().refunds(), in.methods())), "refunds");
+      assertSame(c.expected().get("returnSummary"), JSON.valueToTree(CreditNoteRules.returnSummary(in.sale().lines(), in.notes())),
+          "returnSummary");
     }));
   }
 

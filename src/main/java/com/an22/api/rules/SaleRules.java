@@ -2,7 +2,10 @@ package com.an22.api.rules;
 
 import com.an22.api.config.ClockConfig;
 import com.an22.api.model.Branch;
+import com.an22.api.model.Exchange;
+import com.an22.api.model.SaleLine;
 import java.time.Instant;
+import java.util.Comparator;
 import java.util.List;
 
 /** port จาก {@code core/models/sale.model.ts}: วันขาย, สาขาที่ขาย (D3 / E12), กฎยกเลิกบิล. */
@@ -13,6 +16,24 @@ public final class SaleRules {
   /** {@code saleDay()}: วันท้องถิ่น (Asia/Bangkok) ของบิล 'YYYY-MM-DD'. */
   public static String saleDay(Instant date) {
     return date.atZone(ClockConfig.BANGKOK).toLocalDate().toString();
+  }
+
+  /**
+   * {@code currentSerial()}: serial ที่ลูกค้าถืออยู่ของบรรทัด = serial ใหม่ของใบเปลี่ยนล่าสุด ไม่งั้น serial ที่ขาย — ใบลดหนี้ / void คืนตัวนี้.
+   */
+  public static String currentSerial(List<SaleLine> lines, int index, List<Exchange> exchanges) {
+    String latest = null;
+    for (Exchange x : exchanges.stream().sorted(Comparator.comparing(Exchange::date)).toList()) {
+      for (Exchange.Line l : x.lines()) {
+        if (l.saleLineIndex() == index && l.newSerial() != null && !l.newSerial().isEmpty()) {
+          latest = l.newSerial();
+        }
+      }
+    }
+    if (latest != null) {
+      return latest;
+    }
+    return index >= 0 && index < lines.size() ? lines.get(index).serial() : null;
   }
 
   /**
