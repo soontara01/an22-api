@@ -10,7 +10,7 @@
 #   expect_status N · expect_json '<jq>' ค่า · expect_msg "ข้อความ" · expect_header ชื่อ ค่า
 #   sql "<query>" · expect_sql "<query>" ค่า · as_app TENANT "<sql>" (an22_app ผ่าน pgbouncer, TENANT ว่าง = ไม่ตั้ง)
 #   std_company TAG [plan]                 ชุดข้อมูลมาตรฐาน (หัวข้อ 3) → ตัวแปร CODE TENANT BR_HQ … P_MS …, token T_OWNER
-#   hmac VALUE (hex) · jwt CLAIMS_JSON [kid] · shop_claims TENANT USER_ID [ttl วินาที] · logs SVC SINCE
+#   hmac VALUE (hex) · jwt CLAIMS_JSON [kid] · shop_claims TENANT USER_ID [ttl วินาที] · logs SVC SINCE [UNTIL] · now_utc
 #   finish                                 ตรวจร่วม (5xx / ERROR / ความลับใน log / รูปแบบ error) + สรุป, exit ≠ 0 เมื่อมี ✘
 #
 # ต้องมี docker, curl, jq, openssl; stack ไม่ทำงาน → เปิดเอง (ไม่ล้าง DB — ล้างด้วย reset.sh)
@@ -106,16 +106,20 @@ call() {
   shift 2
   [[ $# -gt 0 ]] && shift
   local args=(-s -m 60 -o "$E2E_WORK/body" -D "$E2E_WORK/headers" -w '%{http_code}' -X "$method")
-  local h has_ip=false
+  local h has_ip=false has_type=false
   for h in "$@"; do
     [[ "${h,,}" == x-real-ip:* ]] && has_ip=true
+    [[ "${h,,}" == content-type:* ]] && has_type=true
     args+=(-H "$h")
   done
   $has_ip || args+=(-H "X-Real-IP: $(rand_ip)")
   [[ -n "$E2E_TOKEN" ]] && args+=(-H "Authorization: Bearer $E2E_TOKEN")
   [[ -n "$E2E_BRANCH" ]] && args+=(-H "X-Branch-Id: $E2E_BRANCH")
   [[ -n "$E2E_TERMINAL" ]] && args+=(-H "X-Terminal-Id: $E2E_TERMINAL")
-  [[ "$body" != - ]] && args+=(-H 'Content-Type: application/json' --data-binary "$body")
+  if [[ "$body" != - ]]; then
+    $has_type || args+=(-H 'Content-Type: application/json')
+    args+=(--data-binary "$body")
+  fi
   STATUS=$(curl "${args[@]}" "$base$path" || true)
   BODY=$(cat "$E2E_WORK/body" 2>/dev/null || true)
   # token ที่ออกให้ (signup / login) — finish ค้นว่าไม่หลุดไป log
@@ -207,7 +211,9 @@ shop_claims() {
     '{iss:"an22-api", aud:["shop"], sub:$sub, iat:$now, exp:($now + $ttl), jti:$jti, tenantId:$t, role:"owner", allBranches:true, branchIds:[]}'
 }
 
-logs() { "${COMPOSE[@]}" logs --since "$2" --no-log-prefix "$1" 2>/dev/null; }
+# logs SVC SINCE [UNTIL] → log ของ service (JSON 1 บรรทัดต่อ event)
+logs() { "${COMPOSE[@]}" logs --since "$2" ${3:+--until "$3"} --no-log-prefix "$1" 2>/dev/null; }
+now_utc() { date -u +%Y-%m-%dT%H:%M:%S.%NZ; }
 
 # ---------- ชุดข้อมูลมาตรฐาน (หัวข้อ 3) ----------
 

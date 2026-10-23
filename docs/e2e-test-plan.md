@@ -95,6 +95,33 @@
 | 2.10 | role ของ DB | — | `an22_app` ไม่ใช่ owner ไม่มี BYPASSRLS; `an22_platform` BYPASSRLS; `statement_timeout=30s`, `idle_in_transaction_session_timeout=60s` ของทั้งสอง role (`pg_db_role_setting`) |
 | 2.11 | log start ของ api | `flyway validate: ผ่าน (FLYWAY_MIGRATE=false)` ทั้งสองตัว | — |
 
+**ผล** 2026-10-23 · commit `c48fe2d` (image เดียวกับข้อ 0 — ไม่ reset) · `scripts/e2e/02-base.sh` · ✅ 96 / ❌ 2 (case 2.4 ❌ — bug ของ api)
+- ✅ 2.1 `/healthz`, `/readyz` ที่ api1 / api2 / lb = 200 `{"status":"ok"}`
+- ✅ 2.2 lb 6 ครั้ง X-Upstream = api2 api1 api2 api1 api2 api1 (สลับทุกครั้ง)
+- ✅ 2.3 หมวดที่สร้าง @api1 เห็นที่ @api2 ทันที, `dt_categories` 1 แถว
+- ❌ 2.4 หยุด pgbouncer: `/healthz` 200 ทันที ✅, request ที่ใช้ DB → 500 `ระบบขัดข้อง กรุณาลองใหม่` (รอ ~30 วิ = connectionTimeout) ✅,
+  เปิดคืน → `/readyz` 200 ใน 2 วิ ไม่ต้อง restart api ✅ — แต่ **`/readyz` ได้ 500 `ระบบขัดข้อง กรุณาลองใหม่` (หลังรอ 30 วิ) ไม่ใช่ 503** ❌ ทั้ง api1 / api2
+  - สาเหตุ (bug ของ api): `HealthService.checkDatabase()` เป็น `@Transactional(readOnly = true, timeout = 5)` — การขอ connection เกิดตอน proxy เปิด transaction
+    **ก่อนเข้า method** → `CannotCreateTransactionException` หลุด `try/catch` ใน method ไป `ErrorHandler` = 500 + log ERROR `unhandled GET /readyz` พร้อม stack;
+    `timeout = 5` ไม่ครอบเวลารอ connection (รอ 30 วิตาม pool)
+  - ผล: probe readiness ยังถือว่า "ไม่พร้อม" (ไม่ใช่ 2xx) แต่ status / ข้อความผิดจากที่ตกลง, ทุก probe ที่ DB ล่มทิ้ง log ERROR + stack, และตอบช้า 30 วิ (เกิน timeout ของ probe ปกติ)
+  - เสนอแก้: เอา `@Transactional` ออกจาก `checkDatabase()` แล้วใช้ `TransactionTemplate` (appTx, readOnly, timeout 5) **ภายใน** `try` จับ `DataAccessException | TransactionException` → 503
+    `ระบบยังไม่พร้อม กรุณาลองใหม่` + log warn; (ไม่บังคับ) จำกัดเวลารอ connection ของ readyz ให้สั้นกว่า probe timeout; เพิ่ม IT ที่ DB ต่อไม่ได้ → 503
+- ✅ 2.5 restart postgres: `/readyz` กลับเป็น 200 เองใน 5 วิ, request ถัดไป 8 ตัว (api1 / api2) 200 ทั้งหมด, api ไม่ถูก restart;
+  5xx ในช่วง 2.4–2.5 = 2 ตัว (GET /categories ของ 2.4) และ log ERROR ในช่วงนั้นมีแค่ access 5xx + stack ของการต่อ DB ไม่ได้
+  (ผลคาดหวังเดิมของ script "ERROR มาจาก access / ErrorHandler เท่านั้น" เข้มเกิน — Tomcat log exception ที่หลุดจาก `ShopSessionFilter` ตอน DB ล่มด้วย ซึ่งผู้ใช้ยังได้ข้อความกลางถูกต้อง)
+- ✅ 2.6 `GET /nope` 404 `ไม่มี endpoint GET /nope`, `DELETE /healthz` 404 `ไม่มี endpoint DELETE /healthz`, `/users/abc` 404 `ไม่มี endpoint GET /users/abc`,
+  JSON พัง / `Content-Type: text/plain` 400 `ข้อมูลที่ส่งมาไม่ถูกต้อง` (ไม่มีแถวใหม่), ไม่มี token 401 `เซสชันหมดอายุ กรุณาเข้าสู่ระบบใหม่`
+- ✅ 2.7 `X-Request-Id: e2e-req.1` คืนค่าเดิม, `bad id!` ได้ UUID ใหม่
+- ✅ 2.8 access log 1 บรรทัดต่อ request: type access, method, path `/api/shifts/current`, status, durationMs (ตัวเลข), tenantId / userId / branchId / terminalId ตรง, `ip` = X-Real-IP ที่ส่ง, ระดับ INFO;
+  `/healthz` / `/readyz` ไม่ขึ้นที่ระดับ info
+- ✅ 2.9 body ของ 4xx: `password` / `email` / `taxId` / `buyer` / `Password` (ซ้อน) / `address` / `reference` (ใน array) = `"***"`, `username` คงเดิม, responseBody ถูก log;
+  `/auth/login` ไม่ log body ทั้งขาเข้า / ขาออก; ไม่มี header ใน log
+- ✅ 2.10 `an22_app` super false / bypassrls false, `an22_platform` bypassrls true, ไม่มีตารางที่สอง role นี้เป็นเจ้าของ; ทั้งสอง role `statement_timeout=30s`, `idle_in_transaction_session_timeout=60s`
+- ✅ 2.11 log `flyway validate: ผ่าน (FLYWAY_MIGRATE=false)` ทั้งสองตัว 1 ครั้ง (ไม่ restart ระหว่างข้อ)
+- ✅ ตรวจร่วม: 5xx / ERROR เฉพาะที่ตั้งใจใน 2.4, ไม่มีรหัสผ่าน / token / กุญแจ / ค่าทดสอบของ 2.9 ใน log, ทุก error ของ api เป็น `{"message"}`
+- หมายเหตุ: รอบแรกมี ✘ เพิ่ม 5 ตัวจาก script (ส่ง `Authorization` ซ้ำ → nginx 400, ค้นคำว่า authorization ไปเจอชื่อ class ใน stack, เงื่อนไข ERROR เข้มเกิน) — แก้ script แล้วรันใหม่ทั้งข้อ
+
 ### ข้อ 3 — login ร้าน / session / throttle (ตัวนับใช้ร่วมข้าม instance)
 | case | ทำอะไร | api คาดหวัง | DB คาดหวัง |
 | --- | --- | --- | --- |
