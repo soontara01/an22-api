@@ -110,6 +110,7 @@ src/test/java/com/an22/api/
 - endpoint ของร้านที่แก้ตาราง platform (แพ็กเกจ, คำขอลบ) = `@Transactional("platformTx")` + ระบุบริษัทจาก `ShopSession` เอง (BYPASSRLS)
 - tenant มาจาก token เท่านั้น — ห้ามรับ tenant จาก URL / query / body; สิทธิ์ / สาขาใช้ของ `ShopSession` (DB) ไม่ใช่ claims
 - งานที่ต้องบันทึกแม้ request ล้ม (นับ login ผิด, audit `login_failed`) = service แยก `REQUIRES_NEW` (`LoginThrottle`)
+- signup ต่อ IP 10 / forgot-password ต่อ IP 10 + ต่อบริษัท+อีเมล 3 ครั้งใน 15 นาที (นับทุกครั้ง — `LoginThrottle.count`) → 429
 - จำกัด login ผิด: บัญชี 5 / IP 30 ครั้งใน 15 นาที → ล็อก 15 นาที, 429 — ใช้ `LoginThrottle.check()` / `fail()` / `succeed()` กับ endpoint ตรวจรหัสใหม่ (ปลดล็อก POS ขั้น 8)
 - รหัสผ่าน BCrypt (`PasswordEncoder` bean); ไม่มีผู้ใช้ก็ยังตรวจกับ hash หลอก (เวลาตอบไม่บอกว่ามีชื่อนี้)
 

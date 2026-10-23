@@ -5,6 +5,7 @@ import com.an22.api.audit.AuditEntry;
 import com.an22.api.security.PiiCipher;
 import com.an22.api.web.ApiException;
 import java.util.List;
+import java.util.Map;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
@@ -56,6 +57,15 @@ public class LoginThrottle {
     if (failedLogin != null) {
       audit.insertOnPlatform(failedLogin);
     }
+  }
+
+  /**
+   * นับการเรียก endpoint public ที่ไม่ได้ตรวจรหัส (สมัครใช้งาน, ลืมรหัสผ่าน) — นับทุกครั้งไม่ว่าผลเป็นอย่างไร; ครบ {@code max} ของ key ใน
+   * {@value #WINDOW_MINUTES} นาที → ล็อก {@value #LOCK_MINUTES} นาที. ผู้เรียก {@link #check} ก่อน.
+   */
+  @Transactional(value = "platformTx", propagation = Propagation.REQUIRES_NEW)
+  public void count(Map<ThrottleKey, Integer> maxByKey) {
+    maxByKey.forEach((key, max) -> dao.fail(cipher.hmac(key.value()), key.scope(), max, WINDOW_MINUTES, LOCK_MINUTES));
   }
 
   /** login สำเร็จ → ล้างตัวนับของบัญชี (ของ IP ไม่ล้าง). */

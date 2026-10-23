@@ -518,7 +518,10 @@ api รันได้หลาย instance หลัง load balancer โดย
     (ไม่เขียน disk) — บริษัทใหญ่มากค่อยทำเป็น job ทีหลัง
   - `/company/deletion`: GET (ไม่มี = body ว่าง), POST (ล็อกแถวบริษัท, ระงับ `deletion` แทนการระงับเดิม, `purgeAfter` = วันนี้ + 30), DELETE (กลับมาใช้งาน แล้ว
     `catchUpIn` ตัดสิน billing ซ้ำใน transaction เดียวกัน); endpoint ที่แก้ตาราง platform ใช้ `Audit.recordOnPlatform`
-  - ยังไม่ทำ (ไม่อยู่ในแผน / mock): จำกัดจำนวนครั้งของ signup / forgot-password ต่อ IP — เสนอผู้ใช้ไว้
+  - **จำกัดครั้ง signup / forgot-password** (เสนอแล้วผู้ใช้ให้ทำ 2026-10-23 — ไม่มีใน mock): ใช้ `LoginThrottle` เดิม (ตาราง `dt_login_throttle`, หน้าต่าง 15 นาที
+    → ล็อก 15 นาที, 429 ข้อความเดียวกับ login) แต่**นับทุกครั้ง**ไม่ว่าผล (`LoginThrottle.count`, REQUIRES_NEW): signup ต่อ IP 10 ครั้ง (กันสร้างบริษัทรัว /
+    ไล่เดารหัสบริษัท), forgot-password ต่อ IP 10 + ต่อรหัสบริษัท + อีเมลที่พิมพ์ 3 ครั้ง (กันยิงอีเมลใส่ owner — นับแม้ไม่มีจริง จึงไม่บอกว่ามีหรือไม่);
+    key แยกจากของ login (`signup:` / `forgot:`); reset-password ไม่จำกัด (token สุ่ม 256 บิต)
 
 ### ขั้น 12 — platform admin
 - endpoint: `/platform/companies` (+ `:id`, `plan`, `suspend`, `reactivate`, `owner-password`, `purge`), `/platform/invoices/:id/pay`; กฎ `PlatformRules`, `CompanyDataRules.purgeError`

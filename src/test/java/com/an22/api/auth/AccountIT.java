@@ -30,8 +30,15 @@ class AccountIT extends ApiTest {
   @Autowired TenantSql sql;
   @Autowired TestMailer mailer;
 
+  /** IP ต่างกันทุก test — ตัวนับต่อ IP ไม่ข้าม test. */
+  private final String ip = "198.51.100." + (1 + Math.abs(UUID.randomUUID().hashCode() % 250));
+
   private ResultActions call(String path, Object body) throws Exception {
-    return mvc.perform(post(path).contentType(MediaType.APPLICATION_JSON).content(JSON.writeValueAsString(body)));
+    return call(path, body, ip);
+  }
+
+  private ResultActions call(String path, Object body, String fromIp) throws Exception {
+    return mvc.perform(post(path).header("X-Real-IP", fromIp).contentType(MediaType.APPLICATION_JSON).content(JSON.writeValueAsString(body)));
   }
 
   private static Map<String, Object> signup(String code) {
@@ -117,7 +124,7 @@ class AccountIT extends ApiTest {
     assertThat(mailer.to(email)).isEmpty();
 
     // ลิงก์จาก APP_BASE_URL ไม่ใช่ Host ของ request
-    mvc.perform(post("/auth/forgot-password").header("Host", "evil.example").header("X-Forwarded-Host", "evil.example")
+    mvc.perform(post("/auth/forgot-password").header("X-Real-IP", ip).header("Host", "evil.example").header("X-Forwarded-Host", "evil.example")
             .contentType(MediaType.APPLICATION_JSON)
             .content(JSON.writeValueAsString(Map.of("companyCode", c.code().toLowerCase(), "email", " OWNER@" + c.code() + ".test "))))
         .andExpect(status().isOk()).andExpect(content().json(answer, true));
@@ -165,5 +172,33 @@ class AccountIT extends ApiTest {
     companies.setUserActive(c, c.owner(), false);
     call("/auth/reset-password", Map.of("token", link.substring(link.indexOf("token=") + 6), "password", "newpass"))
         .andExpect(status().isBadRequest());
+  }
+
+  @Test
+  void signupAndForgotPasswordAreRateLimited() throws Exception {
+    String tooMany = message(LoginThrottle.TOO_MANY);
+    String signupIp = "203.0.113." + (1 + Math.abs(UUID.randomUUID().hashCode() % 250));
+    Map<String, Object> bad = signup("ab");
+    for (int i = 0; i < AccountService.SIGNUP_IP_MAX; i++) {
+      call("/auth/signup", bad, signupIp).andExpect(status().isBadRequest());
+    }
+    // นับทุกครั้ง (รวมที่ตอบ 400) — ครั้งถัดไปของ IP นี้ 429 แม้ข้อมูลถูก; IP อื่นยังสมัครได้
+    call("/auth/signup", signup(newCode()), signupIp).andExpect(status().isTooManyRequests()).andExpect(content().json(tooMany, true));
+    call("/auth/signup", signup(newCode())).andExpect(status().isOk());
+
+    // ต่อรหัสบริษัท + อีเมล: นับแม้ไม่มีจริง (429 ไม่บอกว่ามีหรือไม่)
+    Map<String, String> unknown = Map.of("companyCode", "NOPE" + newCode(), "email", "who@x.test");
+    for (int i = 0; i < AccountService.FORGOT_ACCOUNT_MAX; i++) {
+      call("/auth/forgot-password", unknown).andExpect(status().isOk());
+    }
+    call("/auth/forgot-password", unknown).andExpect(status().isTooManyRequests()).andExpect(content().json(tooMany, true));
+    Company c = companies.create();
+    String email = "owner@" + c.code().toLowerCase() + ".test";
+    Map<String, String> real = Map.of("companyCode", c.code(), "email", email);
+    for (int i = 0; i < AccountService.FORGOT_ACCOUNT_MAX; i++) {
+      call("/auth/forgot-password", real, "192.0.2." + (10 + i)).andExpect(status().isOk());
+    }
+    call("/auth/forgot-password", real, "192.0.2.99").andExpect(status().isTooManyRequests());
+    assertThat(mailer.to(email)).hasSize(AccountService.FORGOT_ACCOUNT_MAX);
   }
 }

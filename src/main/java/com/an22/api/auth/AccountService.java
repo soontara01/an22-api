@@ -26,7 +26,9 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.Base64;
+import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Optional;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -41,9 +43,16 @@ public class AccountService {
   public static final String CODE_TAKEN = "รหัสบริษัทนี้ถูกใช้แล้ว";
   public static final String INVALID_LINK = "ลิงก์ตั้งรหัสผ่านไม่ถูกต้อง หมดอายุ หรือใช้ไปแล้ว — ขอลิงก์ใหม่";
 
+  /** สมัครใช้งานต่อ IP ใน 15 นาที (นับทุกครั้ง — กันสร้างบริษัทรัว / ไล่เดารหัสบริษัทที่มีอยู่). */
+  static final int SIGNUP_IP_MAX = 10;
+  /** ลืมรหัสผ่านต่อ IP / ต่อรหัสบริษัท + อีเมล ใน 15 นาที (กันยิงอีเมลใส่ owner). */
+  static final int FORGOT_IP_MAX = 10;
+  static final int FORGOT_ACCOUNT_MAX = 3;
+
   private static final SecureRandom RANDOM = new SecureRandom();
 
   private final AccountDao dao;
+  private final LoginThrottle throttle;
   private final SessionDao sessionDao;
   private final SessionService sessions;
   private final AuditDao audit;
@@ -55,9 +64,10 @@ public class AccountService {
   private final String baseUrl;
   private final Clock clock;
 
-  AccountService(AccountDao dao, SessionDao sessionDao, SessionService sessions, AuditDao audit, ActorDao actors,
+  AccountService(AccountDao dao, LoginThrottle throttle, SessionDao sessionDao, SessionService sessions, AuditDao audit, ActorDao actors,
       PasswordEncoder passwords, JwtService jwt, PiiCipher cipher, Mailer mailer, ApiProperties props, Clock clock) {
     this.dao = dao;
+    this.throttle = throttle;
     this.sessionDao = sessionDao;
     this.sessions = sessions;
     this.audit = audit;
@@ -78,10 +88,11 @@ public class AccountService {
 
   /**
    * {@code POST /auth/signup}: บริษัททดลองใช้ {@code TRIAL_DAYS} วันของแพ็กเกจที่เลือก + ข้อมูลบริษัท, สาขาแรก, owner, ช่องทางเงินสด — แล้ว login
-   * เป็น owner. รหัสเคยใช้ (รวมบริษัทที่ลบแล้ว) → 400.
+   * เป็น owner. รหัสเคยใช้ (รวมบริษัทที่ลบแล้ว) → 400. เกิน {@link #SIGNUP_IP_MAX} ครั้ง / IP → 429.
    */
   @Transactional("platformTx")
-  public LoginResponse signup(SignupPayload in) {
+  public LoginResponse signup(SignupPayload in, String ip) {
+    limit(Map.of(new ThrottleKey("ip", "signup:" + ip), SIGNUP_IP_MAX));
     SignupPayload p = SignupRules.normalize(in);
     String problem = SignupRules.signupError(p);
     if (problem != null) {
@@ -118,12 +129,15 @@ public class AccountService {
   /**
    * {@code POST /auth/forgot-password}: ตอบข้อความเดียวเสมอ — รหัสบริษัท + อีเมลตรงกับ owner ที่ใช้งานอยู่ → ลิงก์ใช้ครั้งเดียว อายุ
    * {@code RESET_LINK_MINUTES} นาที ทางอีเมล. เก็บแค่ HMAC ของ token; ลิงก์ขึ้นต้นด้วย {@code APP_BASE_URL} (ไม่ใช่ header Host).
+   * เกินเพดานต่อ IP / ต่อรหัสบริษัท + อีเมลที่พิมพ์ (นับแม้ไม่มีจริง — 429 ไม่บอกว่ามีหรือไม่) → 429.
    */
   @Transactional("platformTx")
-  public Message forgotPassword(ForgotPasswordRequest req) {
+  public Message forgotPassword(ForgotPasswordRequest req, String ip) {
     Message answer = new Message(SignupRules.FORGOT_PASSWORD_ANSWER);
     String code = CompanyRules.normalizeCompanyCode(req.companyCode());
     String wanted = req.email() == null ? "" : req.email().strip().toLowerCase(Locale.ROOT);
+    limit(Map.of(new ThrottleKey("ip", "forgot:" + ip), FORGOT_IP_MAX,
+        new ThrottleKey("account", "forgot:" + code + ":" + wanted), FORGOT_ACCOUNT_MAX));
     Optional<CompanyRow> company = code.isEmpty() ? Optional.empty() : sessionDao.companyByCode(Via.PLATFORM, code);
     if (company.isEmpty() || wanted.isEmpty()) {
       return answer;
@@ -140,6 +154,12 @@ public class AccountService {
         Instant.now(clock).plus(Duration.ofMinutes(SignupRules.RESET_LINK_MINUTES)));
     mailer.send(owner.get().email(), "ตั้งรหัสผ่านใหม่ — บริษัท " + code, baseUrl + "/auth/reset-password?token=" + token);
     return answer;
+  }
+
+  /** ล็อกอยู่ → 429; ไม่งั้นนับครั้งนี้ (transaction แยก — นับแม้ request ตอบ 400). */
+  private void limit(Map<ThrottleKey, Integer> maxByKey) {
+    throttle.check(List.copyOf(maxByKey.keySet()));
+    throttle.count(maxByKey);
   }
 
   /** {@code POST /auth/reset-password}: ลิงก์ใช้ได้ครั้งเดียวก่อนหมดอายุ ของ owner ที่ยังใช้งานอยู่ในบริษัทที่ยังไม่ถูกลบ. */

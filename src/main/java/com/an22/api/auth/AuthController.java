@@ -35,16 +35,16 @@ public class AuthController {
     return auth.login(body, ClientIp.of(request));
   }
 
-  /** สมัครใช้งาน (public) — สำเร็จ = login เป็น owner ทันที. */
+  /** สมัครใช้งาน (public) — สำเร็จ = login เป็น owner ทันที; ถี่เกิน → 429. */
   @PostMapping("/auth/signup")
-  LoginResponse signup(@RequestBody SignupPayload body) {
-    return accounts.signup(body);
+  LoginResponse signup(@RequestBody SignupPayload body, HttpServletRequest request) {
+    return accounts.signup(body, ClientIp.of(request));
   }
 
-  /** ลืมรหัสผ่าน owner (public) — ตอบข้อความเดียวเสมอ. */
+  /** ลืมรหัสผ่าน owner (public) — ตอบข้อความเดียวเสมอ; ถี่เกิน → 429. */
   @PostMapping("/auth/forgot-password")
-  AccountService.Message forgotPassword(@RequestBody AccountService.ForgotPasswordRequest body) {
-    return accounts.forgotPassword(body);
+  AccountService.Message forgotPassword(@RequestBody AccountService.ForgotPasswordRequest body, HttpServletRequest request) {
+    return accounts.forgotPassword(body, ClientIp.of(request));
   }
 
   /** ตั้งรหัสผ่านด้วยลิงก์ทางอีเมล (public) — ตอบ body ว่าง. */
