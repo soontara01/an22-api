@@ -124,11 +124,11 @@ class TransferIT extends ApiTest {
         .andExpect(jsonPath("$.lines[0].receivedQty").value(3));
     // เข้าเต็ม 4 ที่ทุนโอน 100 → (5×200 + 4×100) / 9, แล้วตัดที่ขาด 1 ที่ทุนเฉลี่ยนั้น
     stockAt(c.bn(), p).andExpect(jsonPath("$.stock").value(8)).andExpect(jsonPath("$.avgCost").value(155.5556));
-    mvc.perform(as(owner, get("/products/" + p + "/movements")).header("X-Branch-Id", c.bn()))
+    mvc.perform(as(owner, lastYear(get("/products/" + p + "/movements"))).header("X-Branch-Id", c.bn()))
         .andExpect(jsonPath("$.movements[*].type", Matchers.contains("receive", "transfer_in", "issue")))
         .andExpect(jsonPath("$.movements[1].note").value("รับโอนจากสาขา HQ " + prefix + "0001"))
         .andExpect(jsonPath("$.movements[2].note").value("ขาด/เสียหายจากการโอน " + prefix + "0001 · กล่องแตก"));
-    mvc.perform(as(owner, get("/products/" + p + "/movements")).header("X-Branch-Id", c.hq()))
+    mvc.perform(as(owner, lastYear(get("/products/" + p + "/movements"))).header("X-Branch-Id", c.hq()))
         .andExpect(jsonPath("$.movements[1].type").value("transfer_out"))
         .andExpect(jsonPath("$.movements[1].note").value("โอนไปสาขา BN " + prefix + "0001"));
     receive(owner, c.bn(), t, List.of(Map.of("productId", p, "receivedQty", 4, "receivedSerials", List.of())), "")
@@ -161,7 +161,7 @@ class TransferIT extends ApiTest {
     mvc.perform(as(owner, get("/products/" + s + "/serials")).header("X-Branch-Id", c.bn()))
         .andExpect(jsonPath("$[*].serial", Matchers.contains("SN-1", "SN-3")))
         .andExpect(jsonPath("$[*].status", Matchers.contains("in_stock", "damaged")));
-    mvc.perform(as(owner, get("/products/" + s + "/movements")).header("X-Branch-Id", c.bn()))
+    mvc.perform(as(owner, lastYear(get("/products/" + s + "/movements"))).header("X-Branch-Id", c.bn()))
         .andExpect(jsonPath("$.movements[*].type", Matchers.contains("transfer_in", "issue")))
         .andExpect(jsonPath("$.movements[1].serials", Matchers.contains("SN-3")))
         .andExpect(jsonPath("$.movements[1].totalCost").value(-1300.0));

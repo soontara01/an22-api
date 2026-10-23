@@ -1,6 +1,7 @@
 package com.an22.api.web;
 
 import jakarta.servlet.http.HttpServletRequest;
+import java.sql.SQLException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
@@ -57,8 +58,17 @@ public class ErrorHandler {
     return respond(HttpStatus.BAD_REQUEST, ErrorResponse.BAD_REQUEST);
   }
 
+  /** PostgreSQL ยกเลิก query ที่เกิน {@code statement_timeout} ของ role (SQLSTATE 57014) — transaction rollback แล้ว → 503. */
+  static final String QUERY_CANCELED = "57014";
+
   @ExceptionHandler(Exception.class)
   ResponseEntity<ErrorResponse> unexpected(Exception e, HttpServletRequest request) {
+    for (Throwable t = e; t != null; t = t.getCause()) {
+      if (t instanceof SQLException sql && QUERY_CANCELED.equals(sql.getSQLState())) {
+        log.warn("db timeout {} {}", request.getMethod(), apiPath(request));
+        return respond(HttpStatus.SERVICE_UNAVAILABLE, ErrorResponse.DB_TIMEOUT);
+      }
+    }
     log.error("unhandled {} {}", request.getMethod(), apiPath(request), e);
     return respond(HttpStatus.INTERNAL_SERVER_ERROR, ErrorResponse.SERVER_ERROR);
   }

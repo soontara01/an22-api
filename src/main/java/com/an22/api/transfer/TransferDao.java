@@ -29,9 +29,21 @@ public class TransferDao {
     this.jdbc = appJdbc;
   }
 
-  /** ทุกใบ ใหม่สุดก่อน — ผู้เรียกกรองตามขอบเขตสาขา. */
-  public List<Transfer> list() {
-    return withLines(jdbc.sql(SELECT + " ORDER BY created_at DESC, id DESC").query(TransferDao::row).list());
+  /**
+   * ใบของสาขา (null = ทุกสาขา) ตามทิศ: {@code out} = ต้นทาง, {@code in} = ปลายทาง, อื่น = อย่างใดอย่างหนึ่ง — ใหม่สุดก่อน ไม่เกิน {@code limit} ใบ.
+   */
+  public List<Transfer> list(Long branchId, String direction, int limit) {
+    String where = switch (direction == null ? "" : direction) {
+      case "out" -> "from_branch_id = :branch";
+      case "in" -> "to_branch_id = :branch";
+      default -> "(from_branch_id = :branch OR to_branch_id = :branch)";
+    };
+    return withLines(jdbc.sql(SELECT + " WHERE (CAST(:branch AS bigint) IS NULL OR " + where + ") ORDER BY created_at DESC, id DESC"
+            + " LIMIT :limit")
+        .param("branch", branchId)
+        .param("limit", limit)
+        .query(TransferDao::row)
+        .list());
   }
 
   public Optional<Transfer> find(long id) {

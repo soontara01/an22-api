@@ -59,6 +59,14 @@ class ErrorHandlerIT extends ApiTest {
 
   @Test
   @WithMockUser
+  void dbTimeoutIs503() throws Exception {
+    mvc.perform(get("/test-probe/slow"))
+        .andExpect(status().isServiceUnavailable())
+        .andExpect(content().json("{\"message\":\"ระบบใช้เวลานานเกินไป กรุณาลองใหม่หรือลดช่วงข้อมูล\"}", true));
+  }
+
+  @Test
+  @WithMockUser
   void jsonKeepsNullsAndWritesIsoDates() throws Exception {
     mvc.perform(get("/test-probe/nulls"))
         .andExpect(status().isOk())

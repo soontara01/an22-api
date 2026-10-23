@@ -35,9 +35,10 @@ public class ProductDao {
     this.jdbc = appJdbc;
   }
 
-  /** ทุก SKU ที่สาขานี้ เรียงตาม id. */
-  public List<Product> listAt(long branchId) {
-    List<Row> rows = jdbc.sql(SELECT_AT + " ORDER BY p.id").param("branch", branchId).query(ProductDao::row).list();
+  /** ทุก SKU ที่สาขานี้ เรียงตาม id — ไม่เกิน {@code limit} แถว (เพดานรายการ: ผู้เรียกตรวจ). */
+  public List<Product> listAt(long branchId, int limit) {
+    List<Row> rows = jdbc.sql(SELECT_AT + " ORDER BY p.id LIMIT :limit").param("branch", branchId).param("limit", limit)
+        .query(ProductDao::row).list();
     return withChildren(rows, null);
   }
 

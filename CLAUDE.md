@@ -113,6 +113,8 @@ src/test/java/com/an22/api/
 - **สต็อกเปลี่ยนผ่าน `StockLedger` เท่านั้น** (`receive` / `issue` / `recordSerials`): ล็อกแถว `branch_stock` FOR UPDATE → `Costing` → update → movement;
   เอกสารหลายบรรทัดเรียกเรียงตาม productId (กัน deadlock), เรียกหลังตรวจกฎผ่านแล้ว
 - ทุน: `CostHidingAdvice` ซ่อนให้เองทุก response (E43) — ห้ามซ่อนเองทีละ endpoint; ขาเข้าจากคนที่เห็นทุนไม่ได้ไม่ใช้ทุนใน body (E44 — ดู `ProductService.withStoredCosts`)
+- รายการ (list): ไม่มี paging — `rules/ListLimits`: รายการตามวันที่ใช้ `parseRange(from, to)` (บังคับ ≤ 366 วัน, `shiftId=` ยกเว้นตาม spec),
+  dao `LIMIT ListLimits.QUERY_LIMIT` (กรองใน SQL ก่อน LIMIT) แล้ว `rowLimitError(rows.size(), dated)` → 400 (ไม่ตัดเงียบ); DB เกิน statement_timeout → 503 อัตโนมัติ
 - test: `TestCompanies.create()` ต่อ test + `as(token, put(...), body)` / `message("…")`; ทุก endpoint มี test ข้าม tenant (`TenantB`) → 404
 
 ## PgBouncer (transaction pooling) — กติกาโค้ด

@@ -1,5 +1,7 @@
 package com.an22.api.support;
 
+import com.an22.api.config.ClockConfig;
+import java.time.LocalDate;
 import java.util.Map;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -78,6 +80,12 @@ public abstract class ApiTest {
   /** {@code {"message": "…"}}. */
   protected static String message(String text) {
     return JSON.writeValueAsString(Map.of("message", text));
+  }
+
+  /** รายการตามวันที่ต้องมีช่วง ≤ 366 วัน (ListLimits): 366 วันล่าสุดถึงวันนี้ (Asia/Bangkok). */
+  protected static MockHttpServletRequestBuilder lastYear(MockHttpServletRequestBuilder request) {
+    LocalDate today = LocalDate.now(ClockConfig.BANGKOK);
+    return request.param("from", today.minusDays(365).toString()).param("to", today.toString());
   }
 
   protected static MockHttpServletRequestBuilder delete(String path) {

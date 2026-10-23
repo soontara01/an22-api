@@ -221,6 +221,15 @@ api รันได้หลาย instance หลัง load balancer โดย
 - **แก้ spec ใน `../FrontEnd-An22` ก่อนขั้น 8** (endpoint แรกที่โดน; commit เดียว): `api-contract.md` + mock (ตรวจช่วง / เพดานแบบเดียวกัน) + spec ของ mock
   + หน้าบ้านเอา preset "ทั้งหมด" ออกจากหน้าการขาย / กะ และบังคับเลือกช่วงวันที่ — **ข้อความ error + ตัวเลข ยืนยันกับผู้ใช้ตอนนั้น**
 - paging จริง (server กรอง / เรียง / export) = งานแยกหลัง C2
+- **ยืนยันกับผู้ใช้แล้ว (2026-10-23)**: ช่วงวันที่ ≤ **366 วัน**, `MAX_LIST_ROWS` = **20,000**, timeout ของ role 30 วิ / 60 วิ (ตามเดิม); ข้อความ:
+  - ไม่ส่ง `from` / `to` → 400 "กรุณาเลือกช่วงวันที่ (ไม่เกิน 366 วัน)"; เกิน → 400 "ช่วงวันที่ต้องไม่เกิน 366 วัน"
+  - แถวเกิน → 400 "ข้อมูลมากกว่า 20,000 รายการ กรุณาเลือกช่วงวันที่ให้สั้นลง" (list ที่ไม่มีช่วงวันที่: "ข้อมูลมากกว่า 20,000 รายการ กรุณากรองให้แคบลง")
+  - DB เกินเวลา (57014) → 503 "ระบบใช้เวลานานเกินไป กรุณาลองใหม่หรือลดช่วงข้อมูล"
+  - หน้าบ้าน: เอา preset "ทั้งหมด" ออกจากหน้าการขาย / กะ บังคับเลือกช่วง — แก้พร้อม docs + mock ใน commit เดียว
+- **ทำแล้ว (2026-10-23)**: spec หน้าบ้าน `0e0e458` (branch `docs/api-response-limits` ของ FrontEnd-An22 — ยังไม่ push): `list-limit.model.ts`, mock ตรวจช่วง / เพดาน,
+  เอา preset "ทั้งหมด" ออก 4 หน้า (การขาย / กะ / ประวัติการใช้งาน / บัตรสต็อก), ประวัติ serial ย้อนหลัง 366 วัน;
+  api: `rules/ListLimits` (`parseRange`, `rowLimitError`, `QUERY_LIMIT` = 20,001 ใน SQL), ใช้แล้วกับ `/products`, `/transfers` (กรองสาขา / ทิศใน SQL),
+  `/products/:id/movements` (ช่วงบังคับ); `ErrorHandler`: SQLSTATE 57014 → 503 — endpoint ที่มาทีหลัง (`/sales`, `/shifts`, …) ใช้ตัวเดียวกัน
 
 ### Production: Azure Database for PostgreSQL Flexible Server (ผู้ใช้แจ้ง 2026-10-21)
 - PgBouncer = **ตัวในตัวของ Azure** (1.25.2, port 6432 host เดียวกับ server, ตามไปตอน HA failover; ไม่มีบน tier Burstable) — ตั้ง `pgbouncer.enabled`, `pool_mode = transaction`,
@@ -407,7 +416,7 @@ api รันได้หลาย instance หลัง load balancer โดย
   - ยกเลิก: ลำดับตรวจตาม mock (404 → มองเห็น 403 → admin 403 → กฎ 400) จึงตรวจ admin ใน service ไม่ใช่ controller
   - qty / receivedQty เป็น Double ใน payload (กฎจำนวนเต็มทำงาน — แบบเดียวกับ `delta`)
   - ลบ SKU / เปลี่ยนการคุม serial / ประเภท: ไม่มีของสาขาใดแต่อยู่ในใบที่ยังไม่รับ → "ยังมีสต็อกคงเหลือ (ระหว่างโอน TR-…) …" (`stockedBranches || inTransitNote` ของ mock)
-  - ยังไม่ทำ: เพดานแถวของ `GET /transfers` (`MAX_LIST_ROWS`) — รอตกลงเรื่องจำกัดขนาดคำตอบก่อนขั้น 8
+  - เพดานแถวของ `GET /transfers` ทำแล้วพร้อมหัวข้อ "จำกัดขนาดคำตอบ" (2026-10-23)
 
 ### ขั้น 7 — กฎคำนวณ POS + fixtures (pure, ไม่มี DB) ✅ เสร็จ 2026-10-23
 - port `PosPricing` (`priceCart`, `cartError`, `freeSets`, `manualDiscountError`, `belowCostIssues`), `PosPayment` (`paymentSummary`, `paymentError`, `cashDueFor`), ส่วนที่เหลือของ `PaymentMethodRules` (`roundCash`, …)

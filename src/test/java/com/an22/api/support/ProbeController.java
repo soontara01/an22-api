@@ -52,6 +52,11 @@ public class ProbeController {
     throw new IllegalStateException("รายละเอียดภายในที่ห้ามหลุด");
   }
 
+  @GetMapping("/test-probe/slow")
+  void slow() {
+    probe.slow();
+  }
+
   @GetMapping("/test-probe/nulls")
   Nulls nulls() {
     return new Nulls(null, Instant.parse("2026-10-21T03:04:05Z"));

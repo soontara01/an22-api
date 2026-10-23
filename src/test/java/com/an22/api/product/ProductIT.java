@@ -90,7 +90,7 @@ class ProductIT extends ApiTest {
         .andExpect(jsonPath("$[*].stock", Matchers.contains(3, 8)));
     mvc.perform(as(admin, get("/products/1/serials")).header("X-Branch-Id", 2))
         .andExpect(jsonPath("$[*].serial", Matchers.contains("NB-100000013", "NB-100000014")));
-    mvc.perform(as(admin, get("/products/5/movements")).header("X-Branch-Id", 1))
+    mvc.perform(as(admin, lastYear(get("/products/5/movements"))).header("X-Branch-Id", 1))
         .andExpect(jsonPath("$.opening.qty").value(25)).andExpect(jsonPath("$.opening.value").value(21250.0))
         .andExpect(jsonPath("$.openingMovements[0].serials.length()").value(25));
     mvc.perform(as(admin, get("/categories"))).andExpect(jsonPath("$[2].productCount").value(1));
@@ -105,7 +105,7 @@ class ProductIT extends ApiTest {
     mvc.perform(as(staff, get("/products/" + p)).header("X-Branch-Id", c.hq()))
         .andExpect(jsonPath("$.cost").value((Object) null)).andExpect(jsonPath("$.avgCost").value((Object) null))
         .andExpect(jsonPath("$.suppliers[0].cost").value((Object) null)).andExpect(jsonPath("$.stock").value(5));
-    mvc.perform(as(staff, get("/products/" + p + "/movements")).header("X-Branch-Id", c.hq()))
+    mvc.perform(as(staff, lastYear(get("/products/" + p + "/movements"))).header("X-Branch-Id", c.hq()))
         .andExpect(jsonPath("$.closing.value").value((Object) null)).andExpect(jsonPath("$.closing.qty").value(5))
         .andExpect(jsonPath("$.movements[0].totalCost").value((Object) null));
     mvc.perform(as(staff, get("/products/" + p + "/branch-stock"))).andExpect(jsonPath("$[0].avgCost").value((Object) null));
@@ -163,7 +163,7 @@ class ProductIT extends ApiTest {
     stock(owner, c.hq(), p, -24, null).andExpect(status().isBadRequest()).andExpect(content().json(message("สต็อกคงเหลือไม่พอ"), true));
     stock(owner, c.hq(), p, 1.5, 1).andExpect(content().json(message("จำนวนไม่ถูกต้อง"), true));
     stock(owner, c.hq(), p, -20, null).andExpect(jsonPath("$.stock").value(3)).andExpect(jsonPath("$.avgCost").value(306.5217));
-    mvc.perform(as(owner, get("/products/" + p + "/movements")).header("X-Branch-Id", c.hq()))
+    mvc.perform(as(owner, lastYear(get("/products/" + p + "/movements"))).header("X-Branch-Id", c.hq()))
         .andExpect(jsonPath("$.movements[*].type", Matchers.contains("receive", "receive", "issue")))
         .andExpect(jsonPath("$.movements[2].unitCost").value(306.52))
         .andExpect(jsonPath("$.movements[2].totalCost").value(-6130.43))
@@ -173,7 +173,7 @@ class ProductIT extends ApiTest {
     mvc.perform(as(owner, get("/products/" + p)).header("X-Branch-Id", c.bn())).andExpect(jsonPath("$.stock").value(0));
     assertThat(companies.audit(c, "stock_out")).containsExactly("stock_out|M1|-20 — ทดสอบ");
     // บัตรสต็อกของสาขาที่ไม่มีสิทธิ์
-    mvc.perform(as(staff, get("/products/" + p + "/movements").param("branchId", Long.toString(c.bn()))).header("X-Branch-Id", c.hq()))
+    mvc.perform(as(staff, lastYear(get("/products/" + p + "/movements")).param("branchId", Long.toString(c.bn()))).header("X-Branch-Id", c.hq()))
         .andExpect(status().isForbidden()).andExpect(content().json(message("ไม่มีสิทธิ์ดูบัตรสต็อกของสาขานี้"), true));
     // ลบไม่ได้เมื่อยังมีของ
     mvc.perform(as(owner, delete("/products/" + p)))

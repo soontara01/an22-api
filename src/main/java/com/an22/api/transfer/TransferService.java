@@ -12,6 +12,7 @@ import com.an22.api.model.TransferReceivePayload;
 import com.an22.api.product.ProductDao;
 import com.an22.api.rules.CompanyRules;
 import com.an22.api.rules.Costing;
+import com.an22.api.rules.ListLimits;
 import com.an22.api.rules.TransferRules;
 import com.an22.api.rules.UserRules;
 import com.an22.api.stock.SerialDao;
@@ -25,7 +26,6 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
-import java.util.function.LongPredicate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -75,14 +75,9 @@ public class TransferService {
     if (refused != null) {
       throw ApiException.forbidden(refused);
     }
-    LongPredicate inScope = branchId -> "all".equals(scope) || Objects.equals(scope, branchId);
-    return dao.list().stream()
-        .filter(t -> switch (direction == null ? "" : direction) {
-          case "out" -> inScope.test(t.fromBranchId());
-          case "in" -> inScope.test(t.toBranchId());
-          default -> inScope.test(t.fromBranchId()) || inScope.test(t.toBranchId());
-        })
-        .toList();
+    List<Transfer> rows = dao.list("all".equals(scope) ? null : (Long) scope, direction, ListLimits.QUERY_LIMIT);
+    badRequest(ListLimits.rowLimitError(rows.size(), false));
+    return rows;
   }
 
   @Transactional(readOnly = true)
@@ -105,7 +100,8 @@ public class TransferService {
     TransferRules.Context rules = new TransferRules.Context(
         from,
         all.stream().map(b -> new TransferRules.BranchRef(b.id(), b.code(), b.active())).toList(),
-        products.listAt(from).stream()
+        p.lines().stream().map(TransferPayload.Line::productId).filter(Objects::nonNull).distinct()
+            .flatMap(productId -> products.findAt(productId, from).stream())
             .map(x -> new TransferRules.ProductRef(x.id(), x.sku(), x.stock(), x.unit(), x.serialControl(), x.itemType()))
             .toList(),
         units);

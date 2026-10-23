@@ -15,6 +15,13 @@ public class ProbeService {
     this.jdbc = appJdbc;
   }
 
+  /** query ที่เกิน statement_timeout (ตั้งสั้นเฉพาะ transaction นี้) → PostgreSQL 57014. */
+  @Transactional(readOnly = true)
+  public void slow() {
+    jdbc.sql("SET LOCAL statement_timeout = '100ms'").update();
+    jdbc.sql("SELECT pg_sleep(2)").query().singleRow();
+  }
+
   @Transactional(readOnly = true)
   public Map<String, Object> dbSession() {
     return jdbc.sql(

@@ -22,6 +22,7 @@ import com.an22.api.promotion.PromotionDao;
 import com.an22.api.transfer.TransferDao;
 import com.an22.api.rules.CategoryRules;
 import com.an22.api.rules.Costing;
+import com.an22.api.rules.ListLimits;
 import com.an22.api.rules.ProductRules;
 import com.an22.api.rules.SerialRules;
 import com.an22.api.stock.SerialDao;
@@ -31,7 +32,6 @@ import com.an22.api.web.ApiException;
 import com.an22.api.web.BranchContext;
 import java.time.Clock;
 import java.time.LocalDate;
-import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -98,7 +98,9 @@ public class ProductService {
   public List<Product> list(BranchContext ctx) {
     List<Category> cats = categories.list();
     Map<Long, Double> current = prices.current(today(), null);
-    return dao.listAt(stockBranch(ctx)).stream().map(p -> derived(p, cats, current)).toList();
+    List<Product> rows = dao.listAt(stockBranch(ctx), ListLimits.QUERY_LIMIT);
+    badRequest(ListLimits.rowLimitError(rows.size(), false));
+    return rows.stream().map(p -> derived(p, cats, current)).toList();
   }
 
   @Transactional(readOnly = true)
@@ -185,16 +187,18 @@ public class ProductService {
     return at(id, branch);
   }
 
-  /** {@code GET /products/:id/movements}: บัตรสต็อกของสาขาเดียว (E15) — สาขาอื่นได้ถ้าทำงานในสาขานั้นได้. */
+  /**
+   * {@code GET /products/:id/movements}: บัตรสต็อกของสาขาเดียว (E15) — สาขาอื่นได้ถ้าทำงานในสาขานั้นได้; ช่วงวันที่บังคับ ≤ 366 วัน และบรรทัดในช่วง
+   * ไม่เกินเพดาน ({@link ListLimits}).
+   */
   @Transactional(readOnly = true)
   public StockCardResult movements(ShopSession s, BranchContext ctx, long id, String from, String to, String branchParam) {
     long here = stockBranch(ctx);
     at(id, here);
-    LocalDate fromDate = date(from);
-    LocalDate toDate = date(to);
-    if (fromDate != null && toDate != null && fromDate.isAfter(toDate)) {
-      throw ApiException.badRequest("วันที่เริ่มต้องไม่เกินวันที่สิ้นสุด");
-    }
+    ListLimits.ParsedRange parsed = ListLimits.parseRange(from, to);
+    badRequest(parsed.error());
+    LocalDate fromDate = parsed.range().from();
+    LocalDate toDate = parsed.range().to();
     long branch = here;
     if (branchParam != null && !branchParam.isEmpty()) {
       boolean allowed = s.branches().stream().anyMatch(b -> Long.toString(b.id()).equals(branchParam.strip()));
@@ -203,7 +207,9 @@ public class ProductService {
       }
       branch = Long.parseLong(branchParam.strip());
     }
-    return Costing.buildStockCard(stock.movements(branch, id), fromDate, toDate, ClockConfig.BANGKOK);
+    StockCardResult card = Costing.buildStockCard(stock.movements(branch, id), fromDate, toDate, ClockConfig.BANGKOK);
+    badRequest(ListLimits.rowLimitError(card.movements().size(), true));
+    return card;
   }
 
   /** {@code GET /products/:id/branch-stock}: ทุกสาขาที่ใช้งาน (ไม่มีแถว = 0). */
@@ -411,19 +417,6 @@ public class ProductService {
         p.serialLength(), p.saleStatus());
   }
 
-  private static LocalDate date(String value) {
-    if (value == null || value.isEmpty()) {
-      return null;
-    }
-    if (!value.matches("\\d{4}-\\d{2}-\\d{2}")) {
-      throw ApiException.badRequest("รูปแบบวันที่ต้องเป็น YYYY-MM-DD");
-    }
-    try {
-      return LocalDate.parse(value);
-    } catch (DateTimeParseException e) {
-      throw ApiException.badRequest("รูปแบบวันที่ต้องเป็น YYYY-MM-DD");
-    }
-  }
 
   private static String or(String value, String fallback) {
     return value != null ? value : fallback;
