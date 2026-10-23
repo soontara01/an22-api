@@ -143,6 +143,25 @@
 | 3.12 | `POST /auth/verify` ถูก / ผิด / user ปิด | 200 `{user}` / 400 `ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง` (ไม่ใช่ 401) | นับ throttle |
 | 3.13 | platform login `platform`/`platform`, ผิด, ผิด 5 ครั้ง, `/platform/me` | 200 `{token, admin}` / 401 `ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง` / 429 / 200 | — |
 
+**ผล** 2026-10-23 · commit `c48fe2d` (image เดียวกับข้อ 0) · `scripts/e2e/03-auth.sh` · ✅ 142 / ❌ 0
+- ✅ 3.1 ` demo ` / ` Admin ` / admin → 200 token + user (owner, allBranches) + company DEMO + branches 2, ไม่มี passwordHash / `$2a$`; audit `login` +1 (tenant 1, user_id 1, actor user)
+- ✅ 3.2 token จาก @api1 → `/me` ที่ @api2 200, `/me` ของสองตัวเหมือนกัน
+- ✅ 3.3 รหัสผิด / ไม่มีชื่อนี้ / ไม่มีบริษัท / ว่าง → 401 `รหัสบริษัท ชื่อผู้ใช้ หรือรหัสผ่านไม่ถูกต้อง` ทุกกรณี; `login_failed` 2 แถวเฉพาะบริษัทจริง
+  (user_id null, user_name owner / ghost33), ไม่มีของบริษัทที่ไม่มี / ช่องว่าง; `dt_login_throttle` key_hash 32 byte ทุกแถว, ช่อง text มีแค่ scope (ไม่มีชื่อ / IP จริง)
+- ✅ 3.4 cash2 ผิด 5 ครั้งสลับ @api1 / @api2 → ครั้งที่ 6 (รหัสถูก) 429 `พยายามบ่อยเกินไป กรุณารอสักครู่แล้วลองใหม่`; แถว account failures 5, locked_until ≈ +15 นาที
+- ✅ 3.5 IP เดียวผิด 30 ครั้ง (30 บัญชี) → ครั้งที่ 31 (owner รหัสถูก) 429, IP อื่น 200; แถว ip failures 30 ล็อก ≈ 15 นาที
+- ✅ 3.6 mgr ผิด 4 แล้วถูก → 200, แถว account ถูกลบ, แถว ip (failures 4) คงอยู่
+- ✅ 3.7 DEMO somying (ปิดใช้งาน, รหัสถูก) → 401 ข้อความเดียวกับรหัสผิด
+- ✅ 3.8 (ตั้ง DB) overdue / platform / deletion + รหัสถูก → 401 ข้อความตามเหตุ, รหัสผิด → ข้อความกลาง; deletion + owner → 200; คืนสถานะ active แล้ว
+- ✅ 3.9 ปิด cash1 ขณะถือ token → `/me` 401 ทันที; เปิดคืน → token เดิมใช้ได้ (@api2)
+- ✅ 3.10 cash1 `GET /users` 403 → เลื่อนเป็น admin → token เดิม 200 ทันที (คืนเป็น user แล้ว)
+- ✅ 3.11 `X-Branch-Id` สาขาไม่มีสิทธิ์ / สาขาปิด (OLD) / สาขาของ DEMO / `abc` → 403 `ไม่มีสิทธิ์ทำงานในสาขานี้`; สาขาที่มีสิทธิ์ 200; `/me` ไม่สน header
+- ✅ 3.12 `/auth/verify` ถูก → 200 `{user}` (ไม่มี passwordHash), ผิด / ผู้ใช้ปิด → 400 `ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง`; นับ throttle ทั้ง account และ ip
+- ✅ 3.13 platform login → 200 `{admin, token}`, ผิด → 401 `ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง`, ผิดครบ 5 (สลับ instance) → รหัสถูกได้ 429, token เดิม `/platform/me` ที่ @api2 200;
+  แล้วลบแถวตัวนับของบัญชี `platform` คืน (ตกลงกับผู้ใช้) → login ได้ 200
+- ✅ ตรวจร่วม: ไม่มี 5xx / ERROR, ไม่มีรหัสผ่าน / token / กุญแจใน log, ทุก error เป็น `{"message"}`
+- หมายเหตุ: รอบแรก ✘ 1 จากผลคาดหวังของ script (3.12 ตัวนับ boss = 2 เพราะ 3.8 login boss รหัสผิดไปแล้ว — นับถูกตามกฎ) — แก้ให้เทียบส่วนที่เพิ่ม แล้วรันใหม่ทั้งข้อ
+
 ### ข้อ 4 — token / JWT (สร้าง token เองด้วย secret ของ stack)
 | case | ทำอะไร | api คาดหวัง | DB คาดหวัง |
 | --- | --- | --- | --- |
