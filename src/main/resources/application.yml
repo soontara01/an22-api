@@ -54,6 +54,8 @@ an22:
   app:
     base-url: ${APP_BASE_URL:}
     jobs: ${JOBS_ENABLED:true}
+    # เวลา job (cron 6 ช่องของ Spring, Asia/Bangkok) — เปลี่ยนเฉพาะ stack ทดสอบ (scripts/multi-instance-check.sh)
+    jobs-cron: ${JOBS_CRON:0 5 0 * * *}
 
 logging:
   # JSON 1 บรรทัดต่อ event ไป stdout (ไม่เขียนไฟล์) — key-value ของ access log เป็น field ระดับบนสุด, MDC requestId ด้วย

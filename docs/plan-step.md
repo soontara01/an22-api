@@ -1,6 +1,6 @@
 # แผนทำ an22-api (C2) — ทีละขั้นย่อย
 
-สถานะ: ขั้น 12 เสร็จ 2026-10-23 — รอผู้ใช้ก่อนเริ่มขั้น 13
+สถานะ: ขั้น 13 เสร็จ 2026-10-23 — ครบทุกขั้นของ C2 (C3 = งานแยก)
 
 ## บริบท
 
@@ -540,20 +540,37 @@ api รันได้หลาย instance หลัง load balancer โดย
   - purge: ทุกตารางที่มี `tenant_id` (อ่านจาก catalog — ตารางใหม่ถูกลบด้วยเอง) + `dt_password_reset_tokens`, เรียงลูกก่อนแม่ตาม FK ใน `pg_constraint`;
     คง `dt_companies` (`deleted_at`, `deleted_name`, คำขอลบ) และ `dt_billing_invoices`; ไม่ต้องมี migration (an22_platform มี DML ทุกตารางอยู่แล้ว)
 
-### ขั้น 13 — ปิดงาน / พร้อม C3
+### ขั้น 13 — ปิดงาน / พร้อม C3 ✅ เสร็จ 2026-10-23
 - test กวาดข้าม tenant ทุก endpoint (ตาราง endpoint → อ่าน / เขียน id ของบริษัท B ด้วย token A → 404)
 - **test หลาย instance**: compose เปิด api 2 ตัวหลัง load balancer ง่าย ๆ → login ตัวหนึ่ง ใช้ token กับอีกตัว, ขายพร้อมกันจาก 2 ตัวเลขบิลไม่ซ้ำ, job billing ทำงานครั้งเดียว
 - ~~`Dockerfile` (image ของ api) + `compose.yaml` profile รวม postgres + api~~ ทำแล้วในขั้น 0 (2026-10-22) — เหลือ: an22-web จาก image ของมันในตัว compose (ไม่แก้ repo web)
 - ทดลองกับหน้าบ้านจริง: build หน้าบ้านด้วย `useMock: false` ชั่วคราว (ไม่ commit ในหน้าบ้าน) ผ่าน an22-web → login DEMO, ขาย, ปิดกะ
 - อัปเดต `../FrontEnd-An22/docs/backend/README.md` หัวข้อ api ("ทำแล้ว C2 …") + `next-steps-plan.md` — บอกผู้ใช้ก่อน
 - C3 (สลับหน้าบ้านถาวร) เป็นงานแยก ไม่อยู่ในแผนนี้
+- ผลที่ทำ:
+  - `web/CrossTenantSweepIT`: บริษัท B มีข้อมูลทุกชนิด (เครื่อง, ช่องทาง, หมวด, ผู้จำหน่าย, สินค้า, ราคา, โปร, โอน, กะ, บิล + ใบกำกับ + ใบลดหนี้ + ใบเปลี่ยน, บิลพัก)
+    → owner ของ A เรียก**ทุก** endpoint ร้านที่มี `{id}` (57 route — อ่านจาก `RequestMappingHandlerMapping`, route ใหม่ไม่อยู่ในตาราง = test แดง) ด้วย id ของ B → 404 ทุกตัว,
+    ข้อมูลของ B (จำนวนแถว + เวลาแก้ล่าสุดทุกตาราง) ไม่เปลี่ยน; ตัวควบคุม: owner ของ B เรียก GET เดียวกัน → 200
+  - **หลาย instance**: `compose.multi.yaml` (project `an22-multi` แยกจาก DB dev: postgres + pgbouncer + api1 / api2 + nginx round robin [+ web]) +
+    `scripts/multi-instance-check.sh` (รหัส / กุญแจสุ่มทุกรอบ, migrate + seed ด้วย `db-apply.sh` = ทางที่ 2, แอป `FLYWAY_MIGRATE=false`) — ผล:
+    token ของ api1 ใช้กับ api2 ได้, ขาย 20 บิลพร้อมกัน (10 / 10) เลข 0001–0020 ไม่ซ้ำไม่ข้าม สต็อกตัดครบ, job billing ทุก 10 วิทั้ง 2 ตัว → ใบแจ้งหนี้ 1 ใบ
+    (ทุกรอบ api ตัวหนึ่งทำ อีกตัว "ข้าม" เพราะถือล็อกไม่ได้)
+  - เพิ่ม env `JOBS_CRON` (ค่าเริ่ม `0 5 0 * * *` เหมือนเดิม — ตั้งเฉพาะ stack ทดสอบ) + log เมื่อ instance อื่นถือล็อก job
+  - เจอระหว่างทดสอบ: DB ที่มี seed + image (ไม่มี `db/seed`) + `FLYWAY_MIGRATE=false` → validate ไม่ผ่าน (ถูกตามแบบ — production ไม่มี seed);
+    stack ทดสอบ mount `db/seed` + `AN22_DB_LOCATIONS`
+  - an22-web ใน compose: image สร้างจาก**สำเนา** repo web (ใน scratch) + dist หน้าบ้านที่ build ด้วย `useMock: false` ชั่วคราว (แก้ `environment.ts` แล้ว `git checkout` คืน — ไม่ commit)
+  - ทดลองกับหน้าบ้านจริงใน Chrome: login DEMO ผ่านหน้า login จริง → web → lb → api ได้, หน้า dashboard / POS / ตั้งค่า โหลดข้อมูลจาก api ครบ (console ไม่มี error);
+    **ตั้งเลขเครื่อง POS ในหน้า "ตั้งค่า" ไม่ได้ผ่าน Chrome ที่คุมด้วย extension** (dropdown ของ Angular Material ไม่เปิด — API ตอบรายการเครื่องครบ) จึงทดสอบ
+    flow ขาย / ปิดกะผ่าน web ด้วย curl แบบ Angular (cookie `an22.sid` + XSRF): login somchai → เปิดกะ → ขาย (ราคารวมโปร 10%) → ปิดกะ → logout → `/me` 401,
+    ไม่มี XSRF → 403 — ผ่านทั้งหมด; ให้ผู้ใช้ลอง dropdown ในเบราว์เซอร์เองอีกครั้ง
+  - ตอบแล้ว 2026-10-23: แก้ docs ของหน้าบ้าน (README หัวข้อ api + next-steps-plan) → FrontEnd-An22 `3590bc3` branch `docs/c2-done` (ยังไม่ push)
 
 ## เรื่องที่ต้องถามผู้ใช้ระหว่างทาง (ไม่เดา)
 
 1. ~~ขั้น 2: จำกัด login ผิดต่อบัญชี / IP~~ — ตอบแล้ว 2026-10-22 (ขั้น 2)
 2. ~~ขั้น 5: ทุนเฉลี่ย~~ — ตอบแล้ว 2026-10-22: `numeric(14,4)`
 3. ~~ขั้น 10: เพิ่ม fixtures `credit-note.json` ฝั่งหน้าบ้านก่อนหรือไม่~~ — ตอบแล้ว 2026-10-23: เพิ่มก่อน (golden-fixtures.ts ของหน้าบ้าน)
-4. ขั้น 12: `GET /platform/outbox` ไม่มีใน api จริง — หน้า platform ต้องซ่อนเมนูนี้เมื่อไม่ใช่ mock หรือไม่
+4. ~~ขั้น 12: `GET /platform/outbox` ไม่มีใน api จริง~~ — ตอบแล้ว 2026-10-23: ปล่อยเป็น 404 (ไม่แก้หน้าบ้าน)
 5. ~~ขั้น 9: ข้อความ error เมื่อ `reference` เป็นเลขบัตรเต็ม~~ — ตอบแล้ว 2026-10-23: "<ช่องทาง>: ห้ามกรอกเลขบัตรเต็ม — กรอกเฉพาะเลขอนุมัติหรือเลขบัตร 4 หลักท้าย" ใน `paymentError()` (หน้าบ้าน + server ใช้กฎเดียวกัน, เพิ่มเคสใน fixtures)
 6. ก่อนขั้น 8: ข้อความ error + ตัวเลข (ช่วงวันที่สูงสุด, `MAX_LIST_ROWS`, `statement_timeout`) ของการจำกัดขนาดคำตอบ (แก้ spec หน้าบ้านก่อน)
 7. ระยะเก็บเอกสารภาษีก่อน purge (E39) — ยังรอนักบัญชี: purge ตามเดิมไปก่อน

@@ -29,6 +29,7 @@ docker compose down -v             # รีเซ็ต DB local
 scripts/db-apply.sh [--roles] [--seed]   # รัน script DB ด้วยมือ (ทางที่ 2 / DBA) — db/README.md
 docker build -t an22-api:$(git rev-parse --short HEAD) .   # image production
 docker compose --profile api up -d --build                  # ลอง image กับ dev DB (port 8080; ไม่มี seed ใน image)
+scripts/multi-instance-check.sh    # api 2 ตัวหลัง lb (compose.multi.yaml, project an22-multi แยกจาก dev): token ข้าม instance, ขายพร้อมกัน, job ครั้งเดียว — KEEP=1 เก็บ stack
 ```
 
 ## Container (production)
@@ -88,6 +89,7 @@ src/test/java/com/an22/api/
                  TenantSql (รัน SQL เป็น an22_app ในนามบริษัท / ผู้ใช้ — `as` / `rolledBack` / `withoutTenant` / `platform`), TenantB (บริษัทที่ 2 สำหรับ test ข้าม tenant),
                  TestMailer (`@Primary` Mailer เก็บอีเมลที่ส่งให้ test อ่าน)
   db/            SchemaConventionsIT, RlsIT, RowStampIT, SeedIT
+  web/           CrossTenantSweepIT (ทุก route ที่มี {id} ด้วย id ของบริษัทอื่น → 404 — route ใหม่ต้องเพิ่มในตาราง ROUTES)
 ```
 
 ## 3 ชั้น + transaction (บังคับ)
@@ -157,7 +159,7 @@ src/test/java/com/an22/api/
 
 `DB_URL` (PgBouncer) · `DB_MIGRATE_URL` (ตรง) · `DB_APP_USER/PASSWORD` · `DB_PLATFORM_USER/PASSWORD` · `DB_OWNER_USER/PASSWORD` (ไม่ต้องเมื่อ `FLYWAY_MIGRATE=false`) ·
 `DB_POOL_SIZE` (10) · `FLYWAY_MIGRATE` (`true` migrate / `false` validate ผ่าน PgBouncer) · `PII_KEYS` · `PII_HASH_KEY` · `JWT_SECRET` (`<kid>:<base64>,…`) · `JWT_TTL_DAYS` (7) ·
-`LOG_BODY` (`off` / `error` / `all`) · `LOG_BODY_MAX` (4096) · `APP_BASE_URL` (ต้นลิงก์ในอีเมล — ไม่ใช้ `Host`) · `JOBS_ENABLED` (`true`; test = `false`)
+`LOG_BODY` (`off` / `error` / `all`) · `LOG_BODY_MAX` (4096) · `APP_BASE_URL` (ต้นลิงก์ในอีเมล — ไม่ใช้ `Host`) · `JOBS_ENABLED` (`true`; test = `false`) · `JOBS_CRON` (stack ทดสอบเท่านั้น)
 — ค่าผิด / ไม่ตั้ง → ไม่ start ข้อความบอก**ชื่อตัวแปร ไม่บอกค่า** (`ApiProperties.check()`, `PiiCipher.fromEnv`) — ห้ามใช้ bean validation กับค่าลับ (error ของ binding พิมพ์ค่า)
 
 ## ความปลอดภัย (E48 / E49)
