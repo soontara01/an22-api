@@ -15,7 +15,7 @@
 - `reset.sh`: `down -v` → (BUILD=1 ⇒ build image) → `up db pgbouncer` → `db-apply.sh --seed` → `up api1 api2 lb` → รอ `/readyz` ทั้ง 3
 - `lib.sh`:
   - `call [@api1|@api2] METHOD path [json] [header…]` → เก็บ status / body / header; ใส่ `X-Real-IP` สุ่ม `10.<ข้อ>.x.y` ต่อ call (throttle ไม่ปนกัน) เว้นแต่ระบุเอง
-  - `login CODE USER PASS` → token, `as TOKEN` (ใช้ token นี้ใน call ถัดไป), `branch ID` / `terminal N` (header)
+  - `login CODE USER PASS` → `$TOKEN` + `$STATUS` (ไม่พิมพ์ — เรียกใน `$(…)` แล้ว STATUS หาย), `as TOKEN` (ใช้ token นี้ใน call ถัดไป), `branch ID` / `terminal N` (header)
   - `expect_status N`, `expect_json '<jq>' <ค่า>`, `expect_msg "<ข้อความไทยทั้งประโยค>"`, `expect_header`
   - `sql "<query>"` (psql superuser ใน container db), `expect_sql "<query>" <ค่า>`, `as_app TENANT "<sql>"` (เป็น `an22_app` ผ่าน pgbouncer ตั้ง `app.tenant_id`)
   - `std_company TAG [plan]` → สร้างชุดข้อมูลมาตรฐาน (หัวข้อ 3) แล้ว export id ทั้งหมดเป็นตัวแปร
@@ -57,6 +57,20 @@
 | 0.1 | เขียน `reset.sh` / `lib.sh` แล้ว `reset.sh` (BUILD=1) | stack ขึ้น, `/readyz` 200 ทั้ง api1 / api2 / lb | `flyway_schema_history` ทุกแถว success (V1–V9 + seed 1_1 / 3_1 / 4_1 / 5_1 / 8_1); `an22_app` อ่าน `flyway_schema_history` ได้ (grant ของ afterMigrate) |
 | 0.2 | `std_company E0` | ทุก call ตามหัวข้อ 3 สำเร็จ | จำนวนแถว / ทุน / audit ตามหัวข้อ 3 |
 | 0.3 | ฟังก์ชันของ lib ตรวจตัวเอง (`hmac` เทียบ `dt_login_throttle.key_hash` ของ login ผิด 1 ครั้ง, `jwt` ที่สร้างเองใช้กับ `/me` ได้) | `/me` 200 | key_hash ของแถว scope account = `hmac("shop:<CODE>:<username>")`, ของแถว ip = `hmac("ip:<X-Real-IP>")` |
+
+**ผล** 2026-10-23 · commit `c48fe2d` (image `an22-api:local` build จาก commit นี้) · `BUILD=1 scripts/e2e/reset.sh` + `scripts/e2e/00-setup.sh` · ✅ 74 / ❌ 0
+- ✅ 0.1 `/readyz` 200 ทั้ง api1 / api2 / lb; `flyway_schema_history` = 1, 1.1, 2, 3, 3.1, 4, 4.1, 5, 5.1, 6, 7, 8, 8.1, 9 ทุกแถว success;
+  `an22_app` อ่าน `flyway_schema_history` ได้; log ของ api1 / api2 มี `flyway validate: ผ่าน (FLYWAY_MIGRATE=false)`
+- ✅ 0.2 `std_company E0` ทุก call 200 (31 call); DB ตรงหัวข้อ 3 ทุกข้อ: ผู้ใช้ 5 / user_branches 3 / สาขา 2 / เครื่อง 3 /
+  ช่องทาง CASH 1 · CARD 2 · QR 3 · TRANSFER 4 (close_check count / count / count / confirm, CASH ปัด 0.25, CARD เลขอนุมัติ ขั้นต่ำ 300 fee 1.60) /
+  หมวด IT(1) + 4 ระดับ 2 / สินค้า 5 + หน่วยแพ็ก "กล่อง" ×10 / ราคา 5 ช่วงจาก 2020-01-01 / branch_stock HQ MS 20/200.0000 · CBL 100/40 · EXM 10/50 · NB 5/20000, BN MS 5/220 /
+  serial 5 in_stock / movement 5 `receive` / audit signup 1 · branch_change 1 · user_change 4 · terminal_change 3 · price_change 5 (ไม่มีชนิดอื่น) /
+  company_info ค่าเริ่มตามหัวข้อ 3
+- ✅ 0.3 login ผิด 1 ครั้ง → 401 ข้อความกลาง; `dt_login_throttle` แถว account = `hmac("shop:<CODE>:owner")`, แถว ip = `hmac("ip:<X-Real-IP>")` (32 byte, failures 1);
+  token จาก `jwt` ใช้ `/me` ที่ api2 ได้ 200, ลายเซ็นปลอม → 401; login ถูกที่ lb → token ใช้ `/me` ที่ api1 ได้
+- ✅ ตรวจร่วม: ไม่มี 5xx / log ERROR, ไม่มีรหัสผ่าน / token / กุญแจใน log, ทุก error เป็น `{"message"}`
+- หมายเหตุ: ค่าที่หัวข้อ 3 ไม่ได้ระบุ — EXM-001 อยู่หมวด CBL, ทุนสินค้า NB-001 = 20,000, หน่วย MS ชิ้น / NB เครื่อง / CBL เส้น / SVC ครั้ง / EXM เล่ม,
+  อีเมล `owner@<code>.e2e.test` / `boss@<code>.e2e.test`; รอบแรกมี ✘ 1 เพราะ bug ของ script (`login` ใน `$(…)`) — แก้ lib แล้วรันใหม่ผ่าน
 
 ### ข้อ 1 — `./mvnw verify` 1 รอบ
 - คาดหวัง: unit 225 / integration 167 ผ่านทั้งหมด, BUILD SUCCESS — บันทึกจำนวน + เวลา + commit (รันตอนไม่มี stack e2e เปิดอยู่)
