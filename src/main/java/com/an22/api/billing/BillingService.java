@@ -82,6 +82,7 @@ public class BillingService {
   @Transactional("platformTx")
   public int runDaily() {
     if (!dao.tryJobLock(DAILY_JOB_LOCK)) {
+      log.info("billing job: instance อื่นกำลังทำ — ข้าม");
       return -1;
     }
     int changed = 0;
