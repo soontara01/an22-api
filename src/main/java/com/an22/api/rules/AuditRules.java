@@ -1,5 +1,6 @@
 package com.an22.api.rules;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.format.DateTimeParseException;
 import java.util.Set;
@@ -35,15 +36,24 @@ public final class AuditRules {
     }
   }
 
-  /** {@code Number.isInteger(Number(v))}. */
+  /** ยาวกว่านี้ไม่ใช่ id (ตัดก่อน parse — ค่ามาจาก query ของผู้ใช้). */
+  private static final int MAX_ID_TEXT = 32;
+  /** {@code Number.MAX_SAFE_INTEGER} + 1 — เกินนี้ JS ไม่ถือเป็นจำนวนเต็มที่แม่น. */
+  private static final BigDecimal JS_SAFE_LIMIT = BigDecimal.valueOf(9_007_199_254_740_992L);
+
+  /** {@code Number.isInteger(Number(v))}: ตัวเลขฐานสิบ (มีทศนิยม .0 / exponent ได้) ที่เป็นจำนวนเต็ม — ไม่ใช้ regex / ไม่แปลง double. */
   private static Long id(String v) {
-    if (v == null || !v.strip().matches("[+-]?(\\d+\\.?\\d*|\\.\\d+)([eE][+-]?\\d+)?")) {
+    String text = v == null ? "" : v.strip();
+    if (text.isEmpty() || text.length() > MAX_ID_TEXT) {
       return null;
     }
     try {
-      double n = Double.parseDouble(v.strip());
-      return n == Math.rint(n) && Math.abs(n) < 9.007199254740992E15 ? (long) n : null;
-    } catch (NumberFormatException e) {
+      BigDecimal n = new BigDecimal(text);
+      if (n.signum() != 0 && n.stripTrailingZeros().scale() > 0 || n.abs().compareTo(JS_SAFE_LIMIT) >= 0) {
+        return null;
+      }
+      return n.longValueExact();
+    } catch (NumberFormatException | ArithmeticException e) {
       return null;
     }
   }

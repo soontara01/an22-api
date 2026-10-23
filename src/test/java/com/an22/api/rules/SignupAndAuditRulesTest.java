@@ -72,5 +72,12 @@ class SignupAndAuditRulesTest {
     assertThat(AuditRules.parseAuditQuery(null, null, null, "2.0", "1d"))
         .isEqualTo(new AuditRules.Query(null, null, null, 2L, null));
     assertThat(AuditRules.ACTIONS).hasSize(31);
+    // แบบ Number(): exponent / ทศนิยม .0 / เครื่องหมาย ได้; ไม่ใช่จำนวนเต็ม / ยาวเกิน / เกิน MAX_SAFE_INTEGER = ไม่กรอง
+    assertThat(AuditRules.parseAuditQuery(null, null, null, " +1e2 ", "-0").userId()).isEqualTo(100L);
+    assertThat(AuditRules.parseAuditQuery(null, null, null, null, "-0").branchId()).isZero();
+    for (String odd : new String[] {"1.5", "1e-1", "9007199254740992", "1e999999999", "1".repeat(33), "1".repeat(5000) + "x", "0x10", "NaN"}) {
+      assertThat(AuditRules.parseAuditQuery(null, null, null, odd, null).userId()).as(odd).isNull();
+    }
+    assertThat(AuditRules.parseAuditQuery(null, null, null, "9007199254740991", null).userId()).isEqualTo(9_007_199_254_740_991L);
   }
 }
