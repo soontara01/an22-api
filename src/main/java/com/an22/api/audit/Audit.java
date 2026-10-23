@@ -24,4 +24,12 @@ public class Audit {
     dao.insert(new AuditEntry(
         s.tenantId(), "user", s.user().id(), s.user().name(), branchId, terminal, action, refKind, refId, refLabel, detail));
   }
+
+  /** {@link #record} ใน transaction ของ platformTx (งานของร้านที่แก้ตาราง platform: แพ็กเกจ, คำขอลบ). */
+  public void recordOnPlatform(
+      ShopSession s, String action, Long branchId, String refKind, Long refId, String refLabel, String detail) {
+    Long terminal = s.terminalId() == null ? null : s.terminalId().longValue();
+    dao.insertOnPlatform(new AuditEntry(
+        s.tenantId(), "user", s.user().id(), s.user().name(), branchId, terminal, action, refKind, refId, refLabel, detail));
+  }
 }

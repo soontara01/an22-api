@@ -56,9 +56,10 @@ src/main/java/com/an22/api/
   rules/         กฎที่ port จาก core/models — pure Java ไม่ผูก Spring, 1 class ต่อ 1 ไฟล์ TS (UserRules, CompanyRules, StoreInfoRules, MenuAccessRules,
                  PlanRules, CostVisibility, SubscriptionRules, CategoryRules, Suppliers, PaymentMethodRules, PosTerminalRules, Money, ProductRules,
                  Costing, SerialRules, PriceRules, PromotionRules, TransferRules, PosPricing, PosPayment — ผลตรง golden fixtures ผ่าน FixturesTest,
-                 ListLimits, ShiftRules, SaleRules, TaxInvoiceRules, CreditNoteRules, ExchangeRules)
+                 ListLimits, ShiftRules, SaleRules, TaxInvoiceRules, CreditNoteRules, ExchangeRules, AuditRules, SignupRules, CompanyDataRules)
   health/        /healthz, /readyz
-  auth/          login / verify / me (AuthController → AuthService / SessionService → SessionDao), LoginThrottle (+ Dao), ShopSession, PasswordResetTokens
+  auth/          login / verify / me (AuthController → AuthService / SessionService → SessionDao), LoginThrottle (+ Dao), ShopSession, PasswordResetTokens,
+                 signup / forgot-password / reset-password (AccountService → AccountDao, platformTx)
   platform/      /platform/auth/login, /platform/me
   branch/        /branches
   masterdata/    /categories, /suppliers, /payment-methods (+ order)
@@ -71,15 +72,20 @@ src/main/java/com/an22/api/
   sale/          /sales (+ void, status, cost-check), ใบกำกับเต็มรูป + /tax-invoices — SaleService (ลำดับตรวจ 1–8), TaxInvoiceService.create()
                  ใบลดหนี้ (/credit-notes) + ใบเปลี่ยน — CreditNoteService / ExchangeService; SaleStock = เดินสต็อกต่อบรรทัดของเอกสารขาย
   shift/         /shifts/* (เจ้าของกะ = cashier_user_id; ยอดระบบจาก ShiftService.context()), ล็อกหน้าจอ E48
-  company/       /settings/* (SettingsController → SettingsService → CompanyInfoDao / MenuAccessDao), /company/owner, PlanLimits
+  company/       /settings/* (SettingsController → SettingsService → CompanyInfoDao / MenuAccessDao), /company/owner, PlanLimits,
+                 /company/subscription|plan|onboarding (SubscriptionService), /company/export|deletion (CompanyDataService → CompanyExportDao / CompanyAccountDao)
+  billing/       BillingService.catchUp (login / me / job — ออกใบ SUB- + ระงับ overdue), BillingJob (@Scheduled 00:05, ปิดได้ด้วย JOBS_ENABLED=false)
+  mail/          Mailer (LoggingMailer = ยังไม่ส่งจริง, ไม่ log เนื้อหา)
   user/          /users (+ password); UserDao.SELECT / row ใช้ร่วมกับ SessionDao
-  audit/         Audit (บันทึกเหตุการณ์ของผู้ใช้ร้านใน transaction ของ service), AuditDao, AuditEntry
+  audit/         Audit (บันทึกเหตุการณ์ของผู้ใช้ร้านใน transaction ของ service — `recordOnPlatform` เมื่อ service เป็น platformTx), AuditDao, AuditEntry,
+                 GET /audit-log (AuditLogController → AuditLogService)
   <feature>/     XxxController → XxxService → XxxDao
 src/test/java/com/an22/api/
   support/       TestDatabase (singleton container), ApiTest (base: @SpringBootTest + MockMvc, get/post/delete ใส่ /api ให้, `login()` → token, `bearer()`),
                  ProbeController + ProbeService (endpoint ของ test — `/test-probe/session` ผ่าน ShopSessionFilter ครบ), RolesSqlIT,
                  TestCompanies (บริษัทใหม่ต่อ test: owner / boss / staff / gone รหัส 1234, สาขา HQ / BN / OLD — เปลี่ยนสถานะได้ไม่กระทบ DEMO),
-                 TenantSql (รัน SQL เป็น an22_app ในนามบริษัท / ผู้ใช้ — `as` / `rolledBack` / `withoutTenant` / `platform`), TenantB (บริษัทที่ 2 สำหรับ test ข้าม tenant)
+                 TenantSql (รัน SQL เป็น an22_app ในนามบริษัท / ผู้ใช้ — `as` / `rolledBack` / `withoutTenant` / `platform`), TenantB (บริษัทที่ 2 สำหรับ test ข้าม tenant),
+                 TestMailer (`@Primary` Mailer เก็บอีเมลที่ส่งให้ test อ่าน)
   db/            SchemaConventionsIT, RlsIT, RowStampIT, SeedIT
 ```
 
@@ -101,6 +107,7 @@ src/test/java/com/an22/api/
   — endpoint public ใหม่ (signup, ลืมรหัสผ่าน) ต้องเพิ่มใน `SecurityConfig.PUBLIC_PATHS`
 - `ShopSessionFilter` อ่านผู้ใช้ + บริษัทจาก DB ทุก request (ไม่ผ่าน → 401), ตั้ง `TxActor` (ทุก transaction ของ request ได้ RLS ของบริษัทนี้), ตรวจรอลบ (403) / `X-Branch-Id` (403)
   — controller รับ `ShopSession`, `BranchContext`, `TerminalContext` (หรือ `PlatformAdmin`) เป็น parameter; งานเขียนสต็อก / ขาย / กะเรียก `branch.require()` (400)
+- endpoint ของร้านที่แก้ตาราง platform (แพ็กเกจ, คำขอลบ) = `@Transactional("platformTx")` + ระบุบริษัทจาก `ShopSession` เอง (BYPASSRLS)
 - tenant มาจาก token เท่านั้น — ห้ามรับ tenant จาก URL / query / body; สิทธิ์ / สาขาใช้ของ `ShopSession` (DB) ไม่ใช่ claims
 - งานที่ต้องบันทึกแม้ request ล้ม (นับ login ผิด, audit `login_failed`) = service แยก `REQUIRES_NEW` (`LoginThrottle`)
 - จำกัด login ผิด: บัญชี 5 / IP 30 ครั้งใน 15 นาที → ล็อก 15 นาที, 429 — ใช้ `LoginThrottle.check()` / `fail()` / `succeed()` กับ endpoint ตรวจรหัสใหม่ (ปลดล็อก POS ขั้น 8)
@@ -148,7 +155,7 @@ src/test/java/com/an22/api/
 
 `DB_URL` (PgBouncer) · `DB_MIGRATE_URL` (ตรง) · `DB_APP_USER/PASSWORD` · `DB_PLATFORM_USER/PASSWORD` · `DB_OWNER_USER/PASSWORD` (ไม่ต้องเมื่อ `FLYWAY_MIGRATE=false`) ·
 `DB_POOL_SIZE` (10) · `FLYWAY_MIGRATE` (`true` migrate / `false` validate ผ่าน PgBouncer) · `PII_KEYS` · `PII_HASH_KEY` · `JWT_SECRET` (`<kid>:<base64>,…`) · `JWT_TTL_DAYS` (7) ·
-`LOG_BODY` (`off` / `error` / `all`) · `LOG_BODY_MAX` (4096)
+`LOG_BODY` (`off` / `error` / `all`) · `LOG_BODY_MAX` (4096) · `APP_BASE_URL` (ต้นลิงก์ในอีเมล — ไม่ใช้ `Host`) · `JOBS_ENABLED` (`true`; test = `false`)
 — ค่าผิด / ไม่ตั้ง → ไม่ start ข้อความบอก**ชื่อตัวแปร ไม่บอกค่า** (`ApiProperties.check()`, `PiiCipher.fromEnv`) — ห้ามใช้ bean validation กับค่าลับ (error ของ binding พิมพ์ค่า)
 
 ## ความปลอดภัย (E48 / E49)

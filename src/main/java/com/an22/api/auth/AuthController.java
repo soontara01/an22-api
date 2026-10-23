@@ -4,6 +4,7 @@ import com.an22.api.auth.AuthService.LoginRequest;
 import com.an22.api.auth.AuthService.VerifyRequest;
 import com.an22.api.model.LoginResponse;
 import com.an22.api.model.Session;
+import com.an22.api.model.SignupPayload;
 import com.an22.api.model.User;
 import com.an22.api.web.ClientIp;
 import jakarta.servlet.http.HttpServletRequest;
@@ -20,16 +21,36 @@ public class AuthController {
 
   private final AuthService auth;
   private final SessionService sessions;
+  private final AccountService accounts;
 
-  AuthController(AuthService auth, SessionService sessions) {
+  AuthController(AuthService auth, SessionService sessions, AccountService accounts) {
     this.auth = auth;
     this.sessions = sessions;
+    this.accounts = accounts;
   }
 
   /** ไม่ต้องมี token (public chain) — ผิด → 401 ข้อความเดียว, ผิดบ่อย → 429. */
   @PostMapping("/auth/login")
   LoginResponse login(@RequestBody LoginRequest body, HttpServletRequest request) {
     return auth.login(body, ClientIp.of(request));
+  }
+
+  /** สมัครใช้งาน (public) — สำเร็จ = login เป็น owner ทันที. */
+  @PostMapping("/auth/signup")
+  LoginResponse signup(@RequestBody SignupPayload body) {
+    return accounts.signup(body);
+  }
+
+  /** ลืมรหัสผ่าน owner (public) — ตอบข้อความเดียวเสมอ. */
+  @PostMapping("/auth/forgot-password")
+  AccountService.Message forgotPassword(@RequestBody AccountService.ForgotPasswordRequest body) {
+    return accounts.forgotPassword(body);
+  }
+
+  /** ตั้งรหัสผ่านด้วยลิงก์ทางอีเมล (public) — ตอบ body ว่าง. */
+  @PostMapping("/auth/reset-password")
+  void resetPassword(@RequestBody AccountService.ResetPasswordRequest body) {
+    accounts.resetPassword(body);
   }
 
   /** ตรวจรหัสในบริษัทของ token โดยไม่สร้าง session — ผิดทุกกรณี 400. */

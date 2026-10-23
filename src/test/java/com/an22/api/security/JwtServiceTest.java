@@ -29,7 +29,8 @@ class JwtServiceTest {
 
   private static JwtService service(String secret, Clock clock) {
     ApiProperties props =
-        new ApiProperties(null, null, new ApiProperties.Jwt(secret, 7), new ApiProperties.Log(ApiProperties.LogBody.ERROR, 4096));
+        new ApiProperties(null, null, new ApiProperties.Jwt(secret, 7), new ApiProperties.Log(ApiProperties.LogBody.ERROR, 4096),
+            null);
     return new JwtService(props, clock);
   }
 

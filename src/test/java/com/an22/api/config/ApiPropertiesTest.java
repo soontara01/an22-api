@@ -16,7 +16,8 @@ class ApiPropertiesTest {
             ownerPassword, 10, migrate, List.of("filesystem:db/migration")),
         new ApiProperties.Pii("k", "h"),
         new ApiProperties.Jwt("1:secret", 7),
-        new ApiProperties.Log(ApiProperties.LogBody.ERROR, 4096));
+        new ApiProperties.Log(ApiProperties.LogBody.ERROR, 4096),
+        new ApiProperties.App("https://shop.example.test", true));
   }
 
   @Test

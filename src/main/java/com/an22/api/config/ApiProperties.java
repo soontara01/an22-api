@@ -10,7 +10,7 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * เพราะ error ของการ bind พิมพ์ค่าที่ตั้งไว้ลง log (มีรหัสผ่าน / กุญแจ).
  */
 @ConfigurationProperties("an22")
-public record ApiProperties(Db db, Pii pii, Jwt jwt, Log log) {
+public record ApiProperties(Db db, Pii pii, Jwt jwt, Log log, App app) {
 
   public record Db(
       String url,
@@ -41,6 +41,12 @@ public record ApiProperties(Db db, Pii pii, Jwt jwt, Log log) {
 
   public record Log(@DefaultValue("error") LogBody body, @DefaultValue("4096") int bodyMax) {}
 
+  /**
+   * @param baseUrl {@code APP_BASE_URL} = URL ของหน้าเว็บ (an22-web) สำหรับลิงก์ในอีเมล — ไม่ใช้ header {@code Host} (E49)
+   * @param jobs {@code JOBS_ENABLED} เปิด job ตามเวลา (ออกใบแจ้งหนี้ / ระงับค้างชำระ / ล้างของหมดอายุ) — ทุก instance เปิดได้ (ล็อกใน DB)
+   */
+  public record App(String baseUrl, @DefaultValue("true") boolean jobs) {}
+
   /** ตรวจค่าบังคับ — ข้อความบอกชื่อตัวแปร ไม่บอกค่า. */
   public void check() {
     List<String> problems = new ArrayList<>();
@@ -55,6 +61,9 @@ public record ApiProperties(Db db, Pii pii, Jwt jwt, Log log) {
       required(problems, "DB_OWNER_PASSWORD", db.ownerPassword());
     }
     required(problems, "JWT_SECRET", jwt.secret());
+    if (app == null || isBlank(app.baseUrl()) || !app.baseUrl().matches("https?://[^\\s/]+(/\\S*)?")) {
+      problems.add("ต้องตั้ง APP_BASE_URL เป็น URL http(s) ของหน้าเว็บ");
+    }
     if (jwt.ttlDays() < 7) {
       problems.add("JWT_TTL_DAYS ต้อง ≥ 7 (เพดาน session ของ an22-web)");
     }

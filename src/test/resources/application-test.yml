@@ -3,3 +3,7 @@ an22:
   db:
     locations: filesystem:db/migration,filesystem:db/seed
     pool-size: 5
+  app:
+    base-url: https://shop.example.test
+    # test เรียก job เอง (BillingService) — ไม่ให้ scheduler ตื่นกลาง test
+    jobs: false

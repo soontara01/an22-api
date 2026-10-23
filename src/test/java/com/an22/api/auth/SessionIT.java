@@ -123,8 +123,8 @@ class SessionIT extends ApiTest {
         .andExpect(content().json(
             "{\"message\":\"บริษัทอยู่ระหว่างรอลบข้อมูล — ดาวน์โหลดข้อมูลหรือยกเลิกคำขอลบได้ที่เมนูบัญชีบริษัท\"}", true));
     mvc.perform(get("/me").header("Authorization", bearer(owner))).andExpect(status().isOk());
-    // company/* ผ่านด่านนี้ (endpoint จริงมาในขั้น 11 — ตอนนี้ 404)
-    mvc.perform(get("/company/deletion").header("Authorization", bearer(owner))).andExpect(status().isNotFound());
+    // company/* ผ่านด่านนี้
+    mvc.perform(get("/company/deletion").header("Authorization", bearer(owner))).andExpect(status().isOk());
   }
 
   @Test

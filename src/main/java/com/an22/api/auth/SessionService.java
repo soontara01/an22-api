@@ -3,16 +3,20 @@ package com.an22.api.auth;
 import com.an22.api.auth.SessionDao.CompanyRow;
 import com.an22.api.auth.SessionDao.UserRow;
 import com.an22.api.auth.SessionDao.Via;
+import com.an22.api.billing.BillingService;
 import com.an22.api.model.BillingNotice;
 import com.an22.api.model.Branch;
 import com.an22.api.model.Session;
 import com.an22.api.model.User;
 import com.an22.api.rules.SubscriptionRules;
 import com.an22.api.rules.UserRules;
+import com.an22.api.web.ApiException;
+import com.an22.api.web.ErrorResponse;
 import java.time.Clock;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -23,7 +27,10 @@ public class SessionService {
   private final SessionDao dao;
   private final Clock clock;
 
-  SessionService(SessionDao dao, Clock clock) {
+  private final BillingService billingService;
+
+  SessionService(SessionDao dao, Clock clock, BillingService billingService) {
+    this.billingService = billingService;
     this.dao = dao;
     this.clock = clock;
   }
@@ -55,10 +62,18 @@ public class SessionService {
     return Optional.of(of(c, user.get(), dao.branches(Via.APP, tenantId), terminal));
   }
 
-  /** {@code GET /me}: session ปัจจุบัน (ไม่ออก token ใหม่) + แถบแจ้งเตือนการเก็บเงินของ owner / admin. */
+  /**
+   * {@code GET /me}: ออกใบแจ้งหนี้ / ระงับค้างชำระที่ถึงรอบก่อน ({@link BillingService#catchUp}, transaction แยก) แล้วตอบ session ปัจจุบัน (ไม่ออก
+   * token ใหม่) + แถบแจ้งเตือนการเก็บเงินของ owner / admin — ถูกระงับระหว่างนี้ = 401.
+   */
   @Transactional(readOnly = true)
   public Session me(ShopSession session) {
-    return toSession(session, billing(session, Via.APP));
+    ShopSession current = session;
+    if (billingService.catchUp(session.tenantId())) {
+      current = load(session.tenantId(), session.user().id(), session.terminalId() == null ? null : session.terminalId().longValue())
+          .orElseThrow(() -> new ApiException(HttpStatus.UNAUTHORIZED, ErrorResponse.SESSION_EXPIRED));
+    }
+    return toSession(current, billing(current, Via.APP));
   }
 
   /** ประกอบ session จากแถวที่อ่านแล้ว ({@code companySession()} ของ mock). */

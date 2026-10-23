@@ -40,7 +40,8 @@ import tools.jackson.databind.json.JsonMapper;
 public class SecurityConfig {
 
   /** path ที่ไม่ต้องมี token (ไม่รวม /api). */
-  static final String[] PUBLIC_PATHS = {"/healthz", "/readyz", "/error", "/auth/login", "/platform/auth/login"};
+  static final String[] PUBLIC_PATHS = {"/healthz", "/readyz", "/error", "/auth/login", "/auth/signup", "/auth/forgot-password", "/auth/reset-password",
+      "/platform/auth/login"};
 
   @Bean
   PasswordEncoder passwordEncoder() {

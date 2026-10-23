@@ -51,6 +51,9 @@ an22:
   log:
     body: ${LOG_BODY:error}
     body-max: ${LOG_BODY_MAX:4096}
+  app:
+    base-url: ${APP_BASE_URL:}
+    jobs: ${JOBS_ENABLED:true}
 
 logging:
   # JSON 1 บรรทัดต่อ event ไป stdout (ไม่เขียนไฟล์) — key-value ของ access log เป็น field ระดับบนสุด, MDC requestId ด้วย

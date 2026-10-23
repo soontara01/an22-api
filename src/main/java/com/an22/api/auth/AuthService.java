@@ -1,6 +1,7 @@
 package com.an22.api.auth;
 
 import com.an22.api.audit.AuditDao;
+import com.an22.api.billing.BillingService;
 import com.an22.api.audit.AuditEntry;
 import com.an22.api.auth.SessionDao.CompanyRow;
 import com.an22.api.auth.SessionDao.UserRow;
@@ -45,6 +46,7 @@ public class AuthService {
   private final ActorDao actors;
   private final PasswordEncoder passwords;
   private final JwtService jwt;
+  private final BillingService billingService;
   /** hash ที่ไม่ตรงกับอะไรเลย — ตรวจเมื่อไม่มีผู้ใช้ เวลาตอบจะได้ไม่บอกว่าชื่อนี้มีอยู่. */
   private final String dummyHash;
 
@@ -55,7 +57,9 @@ public class AuthService {
       AuditDao audit,
       ActorDao actors,
       PasswordEncoder passwords,
-      JwtService jwt) {
+      JwtService jwt,
+      BillingService billingService) {
+    this.billingService = billingService;
     this.dao = dao;
     this.sessions = sessions;
     this.throttle = throttle;
@@ -80,6 +84,10 @@ public class AuthService {
     throttle.check(keys);
 
     Optional<CompanyRow> company = code.isEmpty() ? Optional.empty() : dao.companyByCode(Via.PLATFORM, code);
+    // ออกใบแจ้งหนี้ / ระงับค้างชำระที่ถึงรอบก่อน job (แผนหัวข้อ "Stateless / scale") แล้วอ่านสถานะใหม่
+    if (company.isPresent() && billingService.catchUp(company.get().id())) {
+      company = dao.companyByCode(Via.PLATFORM, code);
+    }
     if (company.isEmpty()) {
       passwords.matches(String.valueOf(req.password()), dummyHash);
       throttle.fail(keys, null);

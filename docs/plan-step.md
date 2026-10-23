@@ -1,6 +1,6 @@
 # แผนทำ an22-api (C2) — ทีละขั้นย่อย
 
-สถานะ: ขั้น 10 เสร็จ 2026-10-23 — รอผู้ใช้ก่อนเริ่มขั้น 11
+สถานะ: ขั้น 11 เสร็จ 2026-10-23 — รอผู้ใช้ก่อนเริ่มขั้น 12
 
 ## บริบท
 
@@ -491,13 +491,34 @@ api รันได้หลาย instance หลัง load balancer โดย
   - ยอดระบบของกะรวมการคืนเงินของใบลดหนี้ + นับใบเปลี่ยน; ลบเครื่องที่มีใบลดหนี้ / ใบเปลี่ยน → 400
   - ใบเปลี่ยนไม่มี audit (เหมือน mock)
 
-### ขั้น 11 — ส่วน SaaS ของบริษัท
+### ขั้น 11 — ส่วน SaaS ของบริษัท ✅ เสร็จ 2026-10-23
 - `GET /audit-log` (`AuditRules.filterAuditEvents`, `parseAuditQuery`), `GET /company/onboarding`, `GET /company/subscription`, `PUT /company/plan`
 - billing: job รายวัน + `catchUp()` ตอน login / `me` (หัวข้อ "Stateless / scale") ออกใบแจ้งหนี้ `SUB-YYYYMM-NNNN` + ระงับเมื่อพ้นผ่อนผัน; `actorKind: 'system'`
   — test: job 2 ตัวพร้อมกันออกใบเดียว, login ก่อน job ได้ใบแล้ว job ไม่ออกซ้ำ
 - `POST /auth/signup` (ใช้ role platform สร้างบริษัท; audit `signup`), `POST /auth/forgot-password` (ตอบข้อความเดียวเสมอ, token เก็บ hash, ลิงก์จาก `APP_BASE_URL` ไม่ใช่ `Host`), `POST /auth/reset-password` (audit `password_reset`)
 - `GET /company/export` (ไม่มีรหัสผ่าน / token; ข้อมูลผู้ซื้อถอดรหัสแล้ว), `GET|POST|DELETE /company/deletion`; ระหว่างรอลบ: เฉพาะ owner, endpoint อื่น → 403
 - test: billing ตาม `subscription.model.spec.ts` ด้วย `Clock` ปลอม, ลิงก์ไม่ใช้ header `Host`
+- ผลที่ทำ (รายละเอียดที่แผนไม่ได้ระบุ):
+  - env ใหม่: `APP_BASE_URL` (บังคับ, `http(s)://…` — ต้นลิงก์ในอีเมล), `JOBS_ENABLED` (ค่าเริ่ม `true`; test ปิด job แล้วเรียกเอง)
+  - `billing/`: `BillingService.catchUp` (platformTx `REQUIRES_NEW`, ล็อกแถวบริษัท FOR UPDATE → ออกทุกรอบที่ถึง ราคาแพ็กเกจ ณ วันออก, ครบกำหนด +7 วัน → ระงับ `overdue`
+    เมื่อพ้นผ่อนผัน), `runDaily` (job 00:05 Asia/Bangkok, `pg_try_advisory_xact_lock` + ล้าง reset token / ตัวนับ login ผิดที่หมดอายุเกิน 1 วัน), `BillingJob`;
+    login / `me` เรียก `catchUp` ก่อนตรวจสถานะ (ถูกระงับระหว่างนั้น → login ได้ข้อความระงับ, `me` → 401)
+  - `mail/Mailer` + `LoggingMailer` (ยังไม่ส่งจริง — log ผู้รับแบบ mask + หัวเรื่องเท่านั้น ไม่ log ลิงก์ / token); test ใช้ `support/TestMailer` (`@Primary`)
+  - `GET /audit-log` (`audit/AuditLogController` → `AuditLogService` → `AuditDao.list`): ช่วงวันที่บังคับ ≤ 366 วัน (เหมือน mock `dateRangeError`), วันท้องถิ่นของ `at`,
+    admin สาขาเห็นเฉพาะเหตุการณ์ที่ `branch_id` อยู่ใน `branchIds` ของตัวเอง (รวมสาขาที่ปิดแล้ว — `canWorkIn` ของ mock ส่ง `active: true`), เพดาน 20,000 แถว
+  - `/company/subscription` · `/company/onboarding` (นับทุก record รวมที่ปิด เหมือน mock; prices = `dt_sku_prices`) · `PUT /company/plan` (platformTx, ลดได้แม้ใช้เกิน)
+  - `POST /auth/signup` (platformTx, `auth/AccountService` + `AccountDao`): บริษัท (trial = วันนี้ + 14, `nextInvoiceOn` = trial + 1) → owner (stamp `system`)
+    → company_info (ค่าเริ่มของ column = `COMPANY_INFO_DEFAULTS`) / สาขาแรก / ช่องทาง `CASH` (stamp owner) → audit `signup` → `LoginResponse`;
+    รหัสซ้ำ (รวมบริษัทที่ลบแล้ว / สมัครพร้อมกัน — `ON CONFLICT (code)`) → 400 `รหัสบริษัทนี้ถูกใช้แล้ว`
+  - `POST /auth/forgot-password`: token สุ่ม 32 byte (base64url) เก็บ `PiiCipher.hmac(token)` อายุ 60 นาที, ส่งเฉพาะ owner ที่ใช้งานอยู่ + อีเมลตรง (ไม่สนตัวพิมพ์);
+    `POST /auth/reset-password`: ล็อกแถว token (ใช้ได้ครั้งเดียวแม้กดพร้อมกัน) → บริษัทยังไม่ถูกลบ + ผู้ใช้ยังใช้งาน → `passwordError` → audit `password_reset`
+  - `GET /company/export`: **ทุกตารางที่มี `tenant_id`** ที่ an22_app อ่านได้ (ใต้ RLS) + `dt_billing_invoices` ยกเว้น `dt_doc_counters` — ชื่อ collection = ชื่อตารางไม่มี `dt_`
+    แบบ camelCase (`users`, `heldBills`, `auditLog` …), field = column แบบ camelCase (`to_jsonb`), ไม่มี `tenant_id` / `*_hash` (รหัสผ่าน, hash เลขภาษี),
+    `*_enc` ถอดรหัสเป็น JSON ในชื่อไม่มี `_enc` (`heldBills[].payload`, `taxInvoices[].buyer`); `statement_timeout` 120 วิ (SET LOCAL); ประกอบใน memory แล้วตอบ
+    (ไม่เขียน disk) — บริษัทใหญ่มากค่อยทำเป็น job ทีหลัง
+  - `/company/deletion`: GET (ไม่มี = body ว่าง), POST (ล็อกแถวบริษัท, ระงับ `deletion` แทนการระงับเดิม, `purgeAfter` = วันนี้ + 30), DELETE (กลับมาใช้งาน แล้ว
+    `catchUpIn` ตัดสิน billing ซ้ำใน transaction เดียวกัน); endpoint ที่แก้ตาราง platform ใช้ `Audit.recordOnPlatform`
+  - ยังไม่ทำ (ไม่อยู่ในแผน / mock): จำกัดจำนวนครั้งของ signup / forgot-password ต่อ IP — เสนอผู้ใช้ไว้
 
 ### ขั้น 12 — platform admin
 - endpoint: `/platform/companies` (+ `:id`, `plan`, `suspend`, `reactivate`, `owner-password`, `purge`), `/platform/invoices/:id/pay`; กฎ `PlatformRules`, `CompanyDataRules.purgeError`
