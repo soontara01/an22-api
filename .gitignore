@@ -2,3 +2,4 @@
 .env
 target/
 .multi.env.keep
+.e2e/

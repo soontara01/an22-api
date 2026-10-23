@@ -30,6 +30,7 @@ scripts/db-apply.sh [--roles] [--seed]   # รัน script DB ด้วยม�
 docker build -t an22-api:$(git rev-parse --short HEAD) .   # image production
 docker compose --profile api up -d --build                  # ลอง image กับ dev DB (port 8080; ไม่มี seed ใน image)
 scripts/multi-instance-check.sh    # api 2 ตัวหลัง lb (compose.multi.yaml, project an22-multi แยกจาก dev): token ข้าม instance, ขายพร้อมกัน, job ครั้งเดียว — KEEP=1 เก็บ stack
+scripts/e2e/reset.sh && scripts/e2e/NN-*.sh   # E2E ทีละข้อตาม docs/e2e-test-plan.md (stack an22-multi, curl + ตรวจ DB, secrets ใน .e2e/ ไม่ commit)
 ```
 
 ## Container (production)
