@@ -11,6 +11,7 @@
 #   sql "<query>" · expect_sql "<query>" ค่า · as_app TENANT "<sql>" (an22_app ผ่าน pgbouncer, TENANT ว่าง = ไม่ตั้ง)
 #   std_company TAG [plan]                 ชุดข้อมูลมาตรฐาน (หัวข้อ 3) → ตัวแปร CODE TENANT BR_HQ … P_MS …, token T_OWNER
 #   hmac VALUE (hex) · jwt CLAIMS_JSON [kid] · shop_claims TENANT USER_ID [ttl วินาที] · logs SVC SINCE [UNTIL] · now_utc
+#   save_logs · recreate_api · env_set KEY VALUE · jwt_part TOKEN 0|1
 #   finish                                 ตรวจร่วม (5xx / ERROR / ความลับใน log / รูปแบบ error) + สรุป, exit ≠ 0 เมื่อมี ✘
 #
 # ต้องมี docker, curl, jq, openssl; stack ไม่ทำงาน → เปิดเอง (ไม่ล้าง DB — ล้างด้วย reset.sh)
@@ -214,6 +215,32 @@ shop_claims() {
 # logs SVC SINCE [UNTIL] → log ของ service (JSON 1 บรรทัดต่อ event)
 logs() { "${COMPOSE[@]}" logs --since "$2" ${3:+--until "$3"} --no-log-prefix "$1" 2>/dev/null; }
 now_utc() { date -u +%Y-%m-%dT%H:%M:%S.%NZ; }
+# save_logs — เก็บ log ของ api1 / api2 ตั้งแต่เริ่ม script ก่อน recreate container (log เดิมหาย) ให้ finish ตรวจด้วย
+E2E_SAVED_LOGS="$E2E_WORK/saved.log"
+: >"$E2E_SAVED_LOGS"
+save_logs() { { logs api1 "$E2E_SINCE"; logs api2 "$E2E_SINCE"; } >>"$E2E_SAVED_LOGS"; }
+# recreate_api — สร้าง api1 / api2 ใหม่ด้วยค่าใน .e2e/env ปัจจุบัน (เก็บ log เดิมก่อน) แล้วรอ /readyz
+recreate_api() {
+  save_logs
+  "${COMPOSE[@]}" up -d --force-recreate --no-deps api1 api2 >/dev/null 2>&1
+  local url
+  for url in "$API1" "$API2" "$LB"; do
+    for _ in $(seq 1 120); do ready "$url" && break; sleep 1; done
+    ready "$url" || { echo "$url ไม่พร้อมหลัง recreate" >&2; return 1; }
+  done
+}
+# env_set KEY VALUE — แก้ค่าใน .e2e/env (มีผลเมื่อ recreate_api)
+env_set() {
+  local tmp="$E2E_ENV.tmp"
+  awk -v k="$1" -v v="$2" -F= 'BEGIN{OFS="="} $1==k{print k "=" v; next} {print}' "$E2E_ENV" >"$tmp" && chmod 600 "$tmp" && mv "$tmp" "$E2E_ENV"
+}
+# jwt_part TOKEN 0|1 → header / payload (JSON)
+jwt_part() {
+  local p
+  p=$(cut -d. -f$(($2 + 1)) <<<"$1" | tr '_-' '/+')
+  while (( ${#p} % 4 )); do p+="="; done
+  base64 -d <<<"$p" 2>/dev/null
+}
 
 # ---------- ชุดข้อมูลมาตรฐาน (หัวข้อ 3) ----------
 
@@ -329,6 +356,7 @@ std_company() {
 finish() {
   case_id "ร่วม" "ตรวจร่วม: log / ความลับ / รูปแบบ error"
   local svc all="" n
+  all="$(cat "$E2E_SAVED_LOGS")"$'\n'
   for svc in api1 api2; do all+="$(logs "$svc" "$E2E_SINCE")"$'\n'; done
   n=$(grep '"type":"access"' <<<"$all" | grep -cE '"status":"?5[0-9][0-9]' || true)
   if ((n <= E2E_ALLOW_5XX)); then pass "access log 5xx $n (อนุญาต $E2E_ALLOW_5XX)"; else fail "access log 5xx $n (อนุญาต $E2E_ALLOW_5XX)"; fi

@@ -172,6 +172,16 @@
 | 4.5 | ผู้ใช้ถูกลบ / บริษัทถูก purge | 401 | — |
 | 4.6 | หมุน kid: restart api ด้วย `JWT_SECRET=1:<เดิม>,2:<ใหม่>` → token เดิม; ออกใหม่; ตัด kid 1 | token เดิมใช้ได้ / token ใหม่ header kid 2 / token kid 1 → 401 | — |
 
+**ผล** 2026-10-23 · commit `c48fe2d` (image เดียวกับข้อ 0) · `scripts/e2e/04-jwt.sh` · ✅ 84 / ❌ 0
+- ✅ 4.1 แก้ payload (sub) ไม่เซ็นใหม่ / `alg: none` / iss `evil` (เซ็นถูก) → 401 `เซสชันหมดอายุ กรุณาเข้าสู่ระบบใหม่`; คู่เทียบ claims เดียวกัน iss ถูก → 200
+- ✅ 4.2 exp ผ่านไป 120 วิ → 401; token ปกติ exp − iat = 604800 (7 วัน), claims iss `an22-api` / aud `shop` / sub / tenantId / role / allBranches ตรง
+- ✅ 4.3 token platform กับ `/me` → 401 `เซสชันหมดอายุ…`; token ร้านกับ `/platform/me` → 401 `เซสชันผู้ให้บริการหมดอายุ กรุณาเข้าสู่ระบบใหม่`
+- ✅ 4.4 เซ็นถูก tenantId = B, sub = owner / boss ของ A → 401 (ทั้ง lb และ @api2)
+- ✅ 4.5 ลบ boss → token ของ boss 401; บริษัท B ขอลบ (owner ยังใช้ได้ระหว่างรอ) → เลื่อน purge_after (SQL) → platform purge 200 (deleted_at ตั้ง, ผู้ใช้ 0) → token owner B 401
+- ✅ 4.6 recreate api ด้วย `JWT_SECRET=1:<เดิม>,2:<ใหม่>` → token kid 1 ใช้ได้ทั้ง api1 / api2, token ใหม่ header kid 2 ใช้ได้ทั้งสองตัว;
+  ตัด kid 1 → token kid 1 401 ทั้งสองตัว, kid 2 200; คืน `JWT_SECRET` เดิม + recreate (ตกลงกับผู้ใช้) → kid 1 200, kid 2 401; flyway validate ผ่านหลัง recreate
+- ✅ ตรวจร่วม (รวม log ก่อน recreate ทุกรอบ): ไม่มี 5xx / ERROR, ไม่มีรหัสผ่าน / token / กุญแจ (รวม secret kid 2) ใน log, ทุก error เป็น `{"message"}`
+
 ### ข้อ 5 — สมัครใช้งาน / ลืมรหัสผ่าน / ตั้งรหัสใหม่
 | case | ทำอะไร | api คาดหวัง | DB คาดหวัง |
 | --- | --- | --- | --- |
