@@ -4,6 +4,7 @@ import com.an22.api.model.PackUnit;
 import com.an22.api.model.Product;
 import com.an22.api.model.SkuSupplier;
 import com.an22.api.rules.ProductRules;
+import com.an22.api.rules.PromotionRules;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.ArrayList;
@@ -45,6 +46,18 @@ public class ProductDao {
     return withChildren(rows, id).stream().findFirst();
   }
 
+  /** รหัส SKU (ป้ายของ audit / ตรวจว่ามีจริง). */
+  public Optional<String> sku(long id) {
+    return jdbc.sql("SELECT sku FROM dt_products WHERE id = :id").param("id", id).query(String.class).optional();
+  }
+
+  /** ทุก SKU ของบริษัท (เท่าที่กฎโปรโมชั่นใช้). */
+  public List<PromotionRules.ProductRef> refs() {
+    return jdbc.sql("SELECT id, sku, sale_status FROM dt_products ORDER BY id")
+        .query((rs, i) -> new PromotionRules.ProductRef(rs.getLong("id"), rs.getString("sku"), rs.getString("sale_status")))
+        .list();
+  }
+
   /** SKU อื่นของบริษัท (รหัส + บาร์โค้ดทั้งหมด) สำหรับกฎ "ไม่ซ้ำ". */
   public List<ProductRules.Other> others(Long exceptId) {
     return jdbc.sql(
@@ -81,9 +94,12 @@ public class ProductDao {
     setChildren(id, p);
   }
 
-  /** ลบ SKU ที่หมดสต็อกแล้ว: แถวลูก + แถวสต็อกต่อสาขา (เป็น 0 ทั้งหมด) — ประวัติ (movement / serial) อยู่ต่อ. */
+  /**
+   * ลบ SKU ที่หมดสต็อกแล้ว: แถวลูก + แถวสต็อกต่อสาขา (เป็น 0 ทั้งหมด) + ช่วงราคา — ประวัติ (movement / serial) และโปรที่หมดอายุแล้ว
+   * อยู่ต่อ.
+   */
   public void delete(long id) {
-    for (String table : List.of("dt_product_pack_units", "dt_product_suppliers", "dt_branch_stock")) {
+    for (String table : List.of("dt_product_pack_units", "dt_product_suppliers", "dt_branch_stock", "dt_sku_prices")) {
       jdbc.sql("DELETE FROM " + table + " WHERE product_id = :id").param("id", id).update();
     }
     jdbc.sql("DELETE FROM dt_products WHERE id = :id").param("id", id).update();

@@ -5,10 +5,13 @@ import com.an22.api.model.Category;
 import com.an22.api.model.CategoryPayload;
 import com.an22.api.model.PaymentMethod;
 import com.an22.api.model.Supplier;
+import com.an22.api.promotion.PromotionDao;
 import com.an22.api.rules.CategoryRules;
 import com.an22.api.rules.PaymentMethodRules;
 import com.an22.api.rules.Suppliers;
 import com.an22.api.web.ApiException;
+import java.time.Clock;
+import java.time.LocalDate;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -17,7 +20,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 /**
  * ข้อมูลหลักที่ไม่ขึ้นกับ SKU (ขั้น 4): หมวดหมู่, ผู้จำหน่าย, ช่องทางชำระเงิน — อ่านได้ทุกคน, เขียน: admin (controller ตรวจ).
- * กฎตาม {@code handleCategories / handleSuppliers / handlePaymentMethods} ของ mock. ตรวจที่ต้องรู้ SKU / โปร / การขาย มาในขั้น 5 / 5b / 9.
+ * กฎตาม {@code handleCategories / handleSuppliers / handlePaymentMethods} ของ mock. ตรวจที่ต้องรู้การขาย มาในขั้น 9.
  */
 @Service
 public class MasterDataService {
@@ -31,8 +34,13 @@ public class MasterDataService {
   private final SupplierDao suppliers;
   private final PaymentMethodDao methods;
   private final TenantLocks locks;
+  private final PromotionDao promotions;
+  private final Clock clock;
 
-  MasterDataService(CategoryDao categories, SupplierDao suppliers, PaymentMethodDao methods, TenantLocks locks) {
+  MasterDataService(CategoryDao categories, SupplierDao suppliers, PaymentMethodDao methods, TenantLocks locks, PromotionDao promotions,
+      Clock clock) {
+    this.promotions = promotions;
+    this.clock = clock;
     this.categories = categories;
     this.suppliers = suppliers;
     this.methods = methods;
@@ -67,7 +75,7 @@ public class MasterDataService {
     return categories.find(id).orElseThrow();
   }
 
-  /** ลบได้เมื่อไม่มีลูก / SKU / โปรอ้าง (SKU: ขั้น 5, โปร: ขั้น 5b). */
+  /** ลบได้เมื่อไม่มีลูก / SKU / โปรที่ยังไม่หมดอายุอ้าง. */
   @Transactional
   public void deleteCategory(long id) {
     Category current = categories.find(id).orElseThrow(() -> ApiException.notFound(CATEGORY_NOT_FOUND));
@@ -76,6 +84,10 @@ public class MasterDataService {
     }
     if (current.productCount() > 0) {
       throw ApiException.badRequest("ยังมี SKU " + current.productCount() + " รายการในหมวดนี้ ลบไม่ได้");
+    }
+    List<String> usedBy = promotions.codesUsingCategory(id, LocalDate.now(clock));
+    if (!usedBy.isEmpty()) {
+      throw ApiException.badRequest("หมวดหมู่นี้อยู่ในโปรโมชั่น " + String.join(", ", usedBy) + " ลบไม่ได้");
     }
     categories.delete(id);
   }

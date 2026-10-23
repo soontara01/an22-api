@@ -17,6 +17,8 @@ import com.an22.api.model.SerialReceiveResult.FromOtherBranch;
 import com.an22.api.model.SkuSupplier;
 import com.an22.api.model.StockCardResult;
 import com.an22.api.model.Supplier;
+import com.an22.api.price.PriceDao;
+import com.an22.api.promotion.PromotionDao;
 import com.an22.api.rules.CategoryRules;
 import com.an22.api.rules.Costing;
 import com.an22.api.rules.ProductRules;
@@ -26,6 +28,7 @@ import com.an22.api.stock.StockDao;
 import com.an22.api.stock.StockLedger;
 import com.an22.api.web.ApiException;
 import com.an22.api.web.BranchContext;
+import java.time.Clock;
 import java.time.LocalDate;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
@@ -59,9 +62,15 @@ public class ProductService {
   private final StockLedger ledger;
   private final TenantLocks locks;
   private final Audit audit;
+  private final PriceDao prices;
+  private final PromotionDao promotions;
+  private final Clock clock;
 
   ProductService(ProductDao dao, CategoryDao categories, SupplierDao suppliers, BranchDao branches, StockDao stock, SerialDao serials,
-      StockLedger ledger, TenantLocks locks, Audit audit) {
+      StockLedger ledger, TenantLocks locks, Audit audit, PriceDao prices, PromotionDao promotions, Clock clock) {
+    this.prices = prices;
+    this.promotions = promotions;
+    this.clock = clock;
     this.dao = dao;
     this.categories = categories;
     this.suppliers = suppliers;
@@ -85,7 +94,8 @@ public class ProductService {
   @Transactional(readOnly = true)
   public List<Product> list(BranchContext ctx) {
     List<Category> cats = categories.list();
-    return dao.listAt(stockBranch(ctx)).stream().map(p -> withPath(p, cats)).toList();
+    Map<Long, Double> current = prices.current(today(), null);
+    return dao.listAt(stockBranch(ctx)).stream().map(p -> derived(p, cats, current)).toList();
   }
 
   @Transactional(readOnly = true)
@@ -125,7 +135,7 @@ public class ProductService {
     return at(id, branch);
   }
 
-  /** ลบได้เมื่อไม่มีของสาขาใด (มีการขาย → ขั้น 9, อยู่ในโปร → ขั้น 5b). */
+  /** ลบได้เมื่อไม่มีของสาขาใด และไม่อยู่ในโปรที่ยังไม่หมดอายุ (มีการขาย → ขั้น 9); ช่วงราคาของ SKU ลบตามไปด้วย. */
   @Transactional
   public void delete(long id) {
     locks.lock(PRODUCTS);
@@ -133,6 +143,10 @@ public class ProductService {
     String stocked = stockedNote(id);
     if (!stocked.isEmpty()) {
       throw ApiException.badRequest("ยังมีสต็อกคงเหลือ" + stocked + " ลบไม่ได้");
+    }
+    List<String> usedBy = promotions.codesUsingProduct(id, today());
+    if (!usedBy.isEmpty()) {
+      throw ApiException.badRequest("SKU นี้อยู่ในโปรโมชั่น " + String.join(", ", usedBy) + " ลบไม่ได้");
     }
     dao.delete(id);
   }
@@ -324,7 +338,7 @@ public class ProductService {
 
   private Product at(long id, long branch, String notFound) {
     Product p = dao.findAt(id, branch).orElseThrow(() -> ApiException.notFound(notFound));
-    return withPath(p, categories.list());
+    return derived(p, categories.list(), prices.current(today(), id));
   }
 
   private Product serialProduct(long id, long branch) {
@@ -335,10 +349,11 @@ public class ProductService {
     return p;
   }
 
-  private static Product withPath(Product p, List<Category> cats) {
+  /** ค่าที่ server คำนวณ: categoryPath + currentPrice (ราคาของช่วงที่มีผลวันนี้, ไม่มี = null). */
+  private static Product derived(Product p, List<Category> cats, Map<Long, Double> prices) {
     return new Product(p.id(), p.sku(), p.name(), p.shortName(), p.categoryId(), CategoryRules.categoryPath(cats, p.categoryId()),
         p.unit(), p.barcode(), p.packUnits(), p.brand(), p.model(), p.itemType(), p.imageUrl(), p.vatType(), p.cost(), p.avgCost(),
-        p.currentPrice(), p.stock(), p.minStock(), p.maxStock(), p.suppliers(), p.warrantyMonths(), p.serialControl(), p.serialPrefix(),
+        prices.get(p.id()), p.stock(), p.minStock(), p.maxStock(), p.suppliers(), p.warrantyMonths(), p.serialControl(), p.serialPrefix(),
         p.serialLength(), p.saleStatus());
   }
 
@@ -405,6 +420,10 @@ public class ProductService {
 
   private static String or(String value, String fallback) {
     return value != null ? value : fallback;
+  }
+
+  private LocalDate today() {
+    return LocalDate.now(clock);
   }
 
   private static void badRequest(String problem) {

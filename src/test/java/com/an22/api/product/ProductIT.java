@@ -83,7 +83,6 @@ class ProductIT extends ApiTest {
     mvc.perform(as(admin, get("/products/1")).header("X-Branch-Id", 1))
         .andExpect(jsonPath("$.stock").value(12)).andExpect(jsonPath("$.avgCost").value(19900.0))
         .andExpect(jsonPath("$.categoryPath").value("ไอที > คอมพิวเตอร์ > โน้ตบุ๊ก"))
-        .andExpect(jsonPath("$.currentPrice").value((Object) null))
         .andExpect(jsonPath("$.suppliers[0].isMain").value(true));
     mvc.perform(as(admin, get("/products/1")).header("X-Branch-Id", 2))
         .andExpect(jsonPath("$.stock").value(2)).andExpect(jsonPath("$.avgCost").value(20500.0));
@@ -95,6 +94,8 @@ class ProductIT extends ApiTest {
         .andExpect(jsonPath("$.opening.qty").value(25)).andExpect(jsonPath("$.opening.value").value(21250.0))
         .andExpect(jsonPath("$.openingMovements[0].serials.length()").value(25));
     mvc.perform(as(admin, get("/categories"))).andExpect(jsonPath("$[2].productCount").value(1));
+    // ราคาวันนี้ (SEED_PRICES: เมาส์ ฿590 ตั้งแต่ 2026-01-01 ไม่กำหนดวันสิ้นสุด)
+    mvc.perform(as(admin, get("/products/2")).header("X-Branch-Id", 1)).andExpect(jsonPath("$.currentPrice").value(590.0));
   }
 
   @Test

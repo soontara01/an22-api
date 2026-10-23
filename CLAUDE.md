@@ -54,13 +54,16 @@ src/main/java/com/an22/api/
                  ClientIp (X-Real-IP), BranchContext, TerminalContext, RequestContextResolvers
   model/         record ของ JSON = interface TS (User, Branch, Company, Session, LoginResponse, BillingInvoice …)
   rules/         กฎที่ port จาก core/models — pure Java ไม่ผูก Spring, 1 class ต่อ 1 ไฟล์ TS (UserRules, CompanyRules, StoreInfoRules, MenuAccessRules,
-                 PlanRules, CostVisibility, SubscriptionRules, CategoryRules, Suppliers, PaymentMethodRules, PosTerminalRules, Money)
+                 PlanRules, CostVisibility, SubscriptionRules, CategoryRules, Suppliers, PaymentMethodRules, PosTerminalRules, Money, ProductRules,
+                 Costing, SerialRules, PriceRules, PromotionRules)
   health/        /healthz, /readyz
   auth/          login / verify / me (AuthController → AuthService / SessionService → SessionDao), LoginThrottle (+ Dao), ShopSession, PasswordResetTokens
   platform/      /platform/auth/login, /platform/me
   branch/        /branches
   masterdata/    /categories, /suppliers, /payment-methods (+ order)
   product/       /products (+ stock, movements, branch-stock, serials) — ProductService
+  price/         /prices (ช่วงห้ามทับ — EXCLUDE + findOverlap ใต้ล็อก), PriceDao.current() = Product.currentPrice
+  promotion/     /promotions (scope / สาขาเป็น bigint[], ส่วนลด / ของแถมเป็น jsonb ไม่มี FK), codesUsingProduct / codesUsingCategory (กันลบ)
   stock/         StockLedger (จุดเดียวที่แก้สต็อก), StockDao (branch_stock + stock_movements), SerialDao
   pos/           /pos-terminals (ขั้น 8: กะ / ล็อก / บิลพัก)
   company/       /settings/* (SettingsController → SettingsService → CompanyInfoDao / MenuAccessDao), /company/owner, PlanLimits

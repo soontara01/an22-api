@@ -58,7 +58,7 @@ validate ของทางที่ 2 อ่าน `flyway_schema_history` อ�
 - Azure ไม่มี `query_timeout` / `idle_transaction_timeout` ของ PgBouncer — ตาข่าย timeout คือค่าของ role จาก `roles.sql`
 - **TLS บังคับ** (`require_secure_transport`): JDBC URL ใส่ `sslmode=verify-full&sslrootcert=<ไฟล์ CA ของ Azure>`; `db-apply.sh` mount ไฟล์ CA ด้วย `DB_CA_FILE`
 - **network แทน pg_hba** (แก้ pg_hba ของ Azure ไม่ได้): private access / firewall ให้เฉพาะ subnet ของ api + เครื่อง DBA; แอปตรวจตอน start ว่า `DB_URL` ≠ host:port ของ `DB_MIGRATE_URL`
-- extension: ต้องเปิดใน server parameter `azure.extensions` ก่อน migrate ที่ใช้ (เช่น `btree_gist` ขั้น 4)
+- extension: ต้องเปิดใน server parameter `azure.extensions` ก่อน migrate ที่ใช้ — ตอนนี้มี **`BTREE_GIST`** (V5: กันช่วงราคาทับ); เป็น extension แบบ trusted จึงให้ `an22_owner` สร้างเองใน migration ได้
 - **ต้องลองบน Azure จริงก่อนขึ้น production** (ทดสอบในเครื่องได้แค่จำลอง):
   1. `roles.sql` ด้วย server admin — โดยเฉพาะ `an22_platform BYPASSRLS` (PG16+ ผู้ตั้งต้องมี BYPASSRLS เอง)
   2. แอปผ่าน port 6432 + `max_prepared_statements` > 0: statement ซ้ำหลายรอบไม่ error

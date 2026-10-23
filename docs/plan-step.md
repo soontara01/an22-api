@@ -1,6 +1,6 @@
 # แผนทำ an22-api (C2) — ทีละขั้นย่อย
 
-สถานะ: ขั้น 5 เสร็จ 2026-10-22 — รอผู้ใช้ก่อนเริ่มขั้น 5b
+สถานะ: ขั้น 5b เสร็จ 2026-10-23 — รอผู้ใช้ก่อนเริ่มขั้น 6
 
 ## บริบท
 
@@ -228,7 +228,7 @@ api รันได้หลาย instance หลัง load balancer โดย
 - **ไม่มี superuser**: server admin = NOSUPERUSER CREATEDB CREATEROLE (+ `azure_pg_admin`) → `db/roles.sql` เขียนให้รันด้วย admin แบบนี้ (test จำลองด้วย `azure_admin`)
   - `an22_platform BYPASSRLS` บน PG16+ ผู้ตั้งต้องมี BYPASSRLS — Microsoft Q&A บอกว่า admin ทำได้ (ไม่ใช่เอกสารทางการ) → **ต้องลองบน Azure จริงก่อนขึ้น prod**;
     ถ้าไม่ได้ ทางสำรอง: policy `TO an22_platform USING (true)` แทน BYPASSRLS (ถามผู้ใช้ตอนนั้น)
-- ไม่มี pg_hba → network (private access / firewall); TLS บังคับ → URL `sslmode=verify-full&sslrootcert=<CA ของ Azure>`; extension ต้องเปิดใน `azure.extensions` ก่อน migrate (เช่น `btree_gist` ขั้น 4)
+- ไม่มี pg_hba → network (private access / firewall); TLS บังคับ → URL `sslmode=verify-full&sslrootcert=<CA ของ Azure>`; extension ต้องเปิดใน `azure.extensions` ก่อน migrate (`btree_gist` ขั้น 5b)
 - รายการที่ต้องลองบน Azure จริง: `db/README.md` หัวข้อ "Production: Azure"
 
 ### Request
@@ -375,12 +375,24 @@ api รันได้หลาย instance หลัง load balancer โดย
     "2 บิลสลับลำดับไม่ deadlock" ทำในขั้น 9 (ยังไม่มีเอกสารหลายบรรทัด — `StockLedger` ให้ผู้เรียกเรียงตาม productId)
   - ยังไม่ทำ: ระหว่างโอนนับเป็นสต็อก (ขั้น 6), ลบ SKU ที่มีการขาย (9) / อยู่ในโปร (5b), `currentPrice` (5b)
 
-### ขั้น 5b — ราคาขาย + โปรโมชั่น (ย้ายจากขั้น 4 — ตกลง 2026-10-22)
+### ขั้น 5b — ราคาขาย + โปรโมชั่น (ย้ายจากขั้น 4 — ตกลง 2026-10-22) ✅ เสร็จ 2026-10-23
 - migration: `sku_prices` (`EXCLUDE USING gist` — ต้องมี extension `btree_gist`; Azure: เปิดใน `azure.extensions` ก่อน), `promotions` (+ สาขา / ของแถม)
 - กฎ: `PriceRules`, `PromotionRules` (+ `promotionBranchScopeError` 403)
 - endpoint: `/prices`, `/promotions`; audit `price_change`, `promotion_change`; `Product.currentPrice` จากราคา
 - เติม: ลบหมวดที่มีโปรอ้างไม่ได้ / ลบ SKU ที่อยู่ในโปรที่ยังไม่หมดอายุไม่ได้
 - seed: ราคา / โปร ตาม mock
+- ผลที่ทำ (รายละเอียดที่แผนไม่ได้ระบุ):
+  - package `price/` (`/prices`), `promotion/` (`/promotions`); เขียนเฉพาะ admin (403 ตาม mock), อ่านได้ทุกคน; audit ระดับบริษัท (branchId null) ข้อความตาม `recordAudit()` / `deletedLabel()`
+  - `btree_gist` เป็น extension แบบ trusted → `an22_owner` (ไม่ใช่ superuser) สร้างใน V5 ได้; `EXCLUDE` กันช่วงทับเป็นตาข่ายสุดท้าย — แอปตรวจ `findOverlap()` ใต้ล็อก `prices` ก่อนเพื่อข้อความไทย
+  - `dt_promotions`: scope / สาขาเป็น `bigint[]`, `discount` / `free_goods` เป็น `jsonb` รูปเดียวกับ TS — **ไม่มี FK** (โปรที่หมดอายุเป็นประวัติ อ้าง SKU / หมวดที่ลบแล้วได้);
+    รหัสไม่ซ้ำตรวจใต้ล็อก `promotions` + unique `(tenant_id, code)`
+  - ตัวเลขของโปร (priority, minQty, qty, maxSets) เป็น `Double` ใน JSON ให้กฎ "จำนวนเต็ม" ทำงาน (Jackson ตัดทศนิยมเงียบถ้าเป็น Integer) — ส่งออกเป็น `10.0` (ค่าเท่ากันใน JS)
+  - normalize ตาม mock; ต่างจาก mock: Java แยก "ไม่ส่ง" กับ `null` ไม่ได้ → ค่าที่เป็น null ใช้ค่าเริ่ม ยกเว้น `discount` (null คงเป็น null เมื่อเป็นของแถม / มี freeGoods);
+    `type` / `discount.kind` ที่ไม่รู้จัก → 400 "ข้อมูลที่ส่งมาไม่ถูกต้อง" (mock รับไว้เงียบ ๆ แต่ตารางเก็บไม่ได้)
+  - วันที่ของราคา / โปรต้องเป็น 'YYYY-MM-DD' ที่เป็นวันจริง (mock ไม่ตรวจของราคา) → 400 "รูปแบบวันที่ไม่ถูกต้อง" (ข้อความเดียวกับ `promotionError()`)
+  - `Product.currentPrice` = ราคาของช่วงที่มีผลวันนี้ (Asia/Bangkok) คำนวณตอนอ่าน; ลบ SKU = ลบช่วงราคาของมันด้วย (mock ปล่อยค้าง)
+  - ลบ SKU / หมวดที่โปรที่ยังไม่หมดอายุอ้าง (รวมโปรที่ปิดใช้งาน และของแถม) → 400 พร้อมรหัสโปรตามลำดับ id
+  - ยังไม่ทำ: ส่วนคิดราคาของโปร (`discountAmount`, `inScope`, `promotionsForProduct`) → ขั้น 7 / 9
 
 ### ขั้น 6 — ใบโอนสินค้า
 - migration: `transfers`, `transfer_lines`; กฎ `TransferRules`; endpoint `/transfers` (+ `receive`, `cancel`), เลข `TR-…`; audit `transfer_cancel`
