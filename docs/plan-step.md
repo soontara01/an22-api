@@ -1,6 +1,6 @@
 # แผนทำ an22-api (C2) — ทีละขั้นย่อย
 
-สถานะ: ขั้น 11 เสร็จ 2026-10-23 — รอผู้ใช้ก่อนเริ่มขั้น 12
+สถานะ: ขั้น 12 เสร็จ 2026-10-23 — รอผู้ใช้ก่อนเริ่มขั้น 13
 
 ## บริบท
 
@@ -523,11 +523,22 @@ api รันได้หลาย instance หลัง load balancer โดย
     ไล่เดารหัสบริษัท), forgot-password ต่อ IP 10 + ต่อรหัสบริษัท + อีเมลที่พิมพ์ 3 ครั้ง (กันยิงอีเมลใส่ owner — นับแม้ไม่มีจริง จึงไม่บอกว่ามีหรือไม่);
     key แยกจากของ login (`signup:` / `forgot:`); reset-password ไม่จำกัด (token สุ่ม 256 บิต)
 
-### ขั้น 12 — platform admin
+### ขั้น 12 — platform admin ✅ เสร็จ 2026-10-23
 - endpoint: `/platform/companies` (+ `:id`, `plan`, `suspend`, `reactivate`, `owner-password`, `purge`), `/platform/invoices/:id/pay`; กฎ `PlatformRules`, `CompanyDataRules.purgeError`
 - ทุกการกระทำลง `audit_log` ของบริษัทนั้น `actorKind: 'platform'`; purge ลบทุกตารางของ tenant (เหลือแถว `companies` + `deleted_at`)
 - `GET /platform/outbox` ไม่ทำ (mock เท่านั้น) — **บอกผู้ใช้** ว่าหน้า platform จะได้ 404 ตรงนี้ เผื่อต้องแก้หน้าบ้าน
 - test: token platform เห็นทุกบริษัท, token ร้าน → 401, purge แล้ว login / token เดิม → 401
+- ผลที่ทำ (รายละเอียดที่แผนไม่ได้ระบุ):
+  - ตอบแล้ว 2026-10-23: `GET /platform/outbox` **ปล่อยเป็น 404** (ไม่แก้หน้าบ้าน) — เมนู "อีเมลที่ส่ง (mock)" ใช้ได้เฉพาะ mock
+  - `platform/PlatformCompanyController` → `PlatformCompanyService` → `PlatformCompanyDao` (platformTx, ระบุบริษัทเองทุก query); `rules/PlatformRules`,
+    `CompanyDataRules.purgeError`; model `PlatformCompany.Row` / `Detail`
+  - ลำดับตรวจตาม mock: ไม่มีบริษัท 404 `ไม่พบบริษัท` → ลบแล้ว 400 `บริษัทนี้ถูกลบข้อมูลแล้ว` (ยกเว้น GET) → กฎ 400; งานแก้ล็อกแถวบริษัท FOR UPDATE
+  - audit ของ platform: `actor_kind = platform`, `user_id` null, `user_name` = ชื่อ admin (stamp ของแถวยังเป็น admin id); purge ไม่มี audit (ลบทั้งหมด เหมือน mock)
+  - **ต่างจาก mock**: mock คิด billing ทุกบริษัททุก request ของ platform — api ไม่คิด (job รายวัน + login / me ตามหัวข้อ "Stateless / scale");
+    status / ยอดค้างคำนวณจากใบที่มี ณ วันนี้
+  - รับชำระ: ล็อกใบ + บริษัท → paid → ระงับ `overdue` และไม่เหลือใบเกินผ่อนผัน → เปิดใช้งานเอง; audit `invoice_paid` ref = เลขใบ, detail `฿<ยอด>`
+  - purge: ทุกตารางที่มี `tenant_id` (อ่านจาก catalog — ตารางใหม่ถูกลบด้วยเอง) + `dt_password_reset_tokens`, เรียงลูกก่อนแม่ตาม FK ใน `pg_constraint`;
+    คง `dt_companies` (`deleted_at`, `deleted_name`, คำขอลบ) และ `dt_billing_invoices`; ไม่ต้องมี migration (an22_platform มี DML ทุกตารางอยู่แล้ว)
 
 ### ขั้น 13 — ปิดงาน / พร้อม C3
 - test กวาดข้าม tenant ทุก endpoint (ตาราง endpoint → อ่าน / เขียน id ของบริษัท B ด้วย token A → 404)

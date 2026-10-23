@@ -56,11 +56,12 @@ src/main/java/com/an22/api/
   rules/         กฎที่ port จาก core/models — pure Java ไม่ผูก Spring, 1 class ต่อ 1 ไฟล์ TS (UserRules, CompanyRules, StoreInfoRules, MenuAccessRules,
                  PlanRules, CostVisibility, SubscriptionRules, CategoryRules, Suppliers, PaymentMethodRules, PosTerminalRules, Money, ProductRules,
                  Costing, SerialRules, PriceRules, PromotionRules, TransferRules, PosPricing, PosPayment — ผลตรง golden fixtures ผ่าน FixturesTest,
-                 ListLimits, ShiftRules, SaleRules, TaxInvoiceRules, CreditNoteRules, ExchangeRules, AuditRules, SignupRules, CompanyDataRules)
+                 ListLimits, ShiftRules, SaleRules, TaxInvoiceRules, CreditNoteRules, ExchangeRules, AuditRules, SignupRules, CompanyDataRules, PlatformRules)
   health/        /healthz, /readyz
   auth/          login / verify / me (AuthController → AuthService / SessionService → SessionDao), LoginThrottle (+ Dao), ShopSession, PasswordResetTokens,
                  signup / forgot-password / reset-password (AccountService → AccountDao, platformTx)
-  platform/      /platform/auth/login, /platform/me
+  platform/      /platform/auth/login, /platform/me, /platform/companies/* + /platform/invoices/:id/pay (PlatformCompanyService → PlatformCompanyDao,
+                 audit actor platform; purge ลบทุกตารางที่มี tenant_id ตาม FK — ไม่มี /platform/outbox)
   branch/        /branches
   masterdata/    /categories, /suppliers, /payment-methods (+ order)
   product/       /products (+ stock, movements, branch-stock, serials) — ProductService
