@@ -167,7 +167,8 @@ header() { tr -d '\r' <"$E2E_WORK/headers" | awk -v n="${1,,}" -F': ' 'tolower($
 # ---------- DB ----------
 
 # sql "<query>" → ผลแบบ unaligned, คั่นด้วย | (superuser ต่อตรง ใน container db)
-sql() { "${COMPOSE[@]}" exec -T db psql -qAtX -v ON_ERROR_STOP=1 -U postgres -d an22 -c "$1"; }
+# (</dev/null: exec -T อ่าน stdin — ห้ามแย่ง heredoc ของลูปที่เรียก sql)
+sql() { "${COMPOSE[@]}" exec -T db psql -qAtX -v ON_ERROR_STOP=1 -U postgres -d an22 -c "$1" </dev/null; }
 expect_sql() {
   local got
   got=$(sql "$1" 2>&1 || true)
