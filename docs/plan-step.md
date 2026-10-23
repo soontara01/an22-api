@@ -1,6 +1,6 @@
 # แผนทำ an22-api (C2) — ทีละขั้นย่อย
 
-สถานะ: ขั้น 6 เสร็จ 2026-10-23 — รอผู้ใช้ก่อนเริ่มขั้น 7
+สถานะ: ขั้น 7 เสร็จ 2026-10-23 — รอผู้ใช้ก่อนเริ่มขั้น 8 (ต้องตกลงเรื่องจำกัดขนาดคำตอบก่อน)
 
 ## บริบท
 
@@ -409,10 +409,19 @@ api รันได้หลาย instance หลัง load balancer โดย
   - ลบ SKU / เปลี่ยนการคุม serial / ประเภท: ไม่มีของสาขาใดแต่อยู่ในใบที่ยังไม่รับ → "ยังมีสต็อกคงเหลือ (ระหว่างโอน TR-…) …" (`stockedBranches || inTransitNote` ของ mock)
   - ยังไม่ทำ: เพดานแถวของ `GET /transfers` (`MAX_LIST_ROWS`) — รอตกลงเรื่องจำกัดขนาดคำตอบก่อนขั้น 8
 
-### ขั้น 7 — กฎคำนวณ POS + fixtures (pure, ไม่มี DB)
+### ขั้น 7 — กฎคำนวณ POS + fixtures (pure, ไม่มี DB) ✅ เสร็จ 2026-10-23
 - port `PosPricing` (`priceCart`, `cartError`, `freeSets`, `manualDiscountError`, `belowCostIssues`), `PosPayment` (`paymentSummary`, `paymentError`, `cashDueFor`), ส่วนที่เหลือของ `PaymentMethodRules` (`roundCash`, …)
 - `FixturesTest` (`@TestFactory`): `price-cart.json` (293 เคส) + `payment.json` (200 เคส) เทียบทั้ง object ด้วยค่าตัวเลข + ข้อความตรงทุกตัวอักษร — **ต้องผ่านทุกเคสก่อนขั้น 9**
 - path fixtures: `../FrontEnd-An22/docs/backend/fixtures` (ตั้งทับได้ด้วย system property `fixtures.dir` สำหรับ CI)
+- ผลที่ทำ (รายละเอียดที่แผนไม่ได้ระบุ):
+  - fixtures จริงมี **35 เคส** (`price-cart.json`) + **22 เคส** (`payment.json`) ไม่ใช่ 293 / 200 ตามที่แผนเขียน — ผ่านครบทั้ง 57 เคส
+    (เทียบทั้งต้นไม้ JSON: key ครบเท่ากัน, ตัวเลขเทียบค่า, ข้อความตรงตัว); ลองแก้โค้ดให้ผิด (VAT, เศษจากการเฉลี่ย) แล้ว test แดงจริง
+  - `rules/PosPricing` (`priceCart`, `cartError`, `freeSets`, `manualDiscountError`, `manualDiscountValueError` / `Baht`, `belowCostIssues`),
+    `rules/PosPayment` (`paymentSummary`, `paymentError`, `cashDueFor`, `baht()` = en-US ทศนิยมไม่เกิน 2 ปัดครึ่งออกจากศูนย์);
+    `PromotionRules` เพิ่ม `discountAmount` / `inScope`; `roundCash` มีใน `PaymentMethodRules` แล้วตั้งแต่ขั้น 4
+  - model ของ sale ที่กฎใช้: `CartItem`, `ManualDiscount`, `FreeSerial`, `PaymentInput`, `SalePayment` (ตัวเลขขาเข้าเป็น Double ให้กฎจำนวนเต็มทำงาน);
+    `PricedLine` / `PricedCart` / `CartIssue` / `PaymentSummary` เป็น record ใน class ของกฎ
+  - spec ของ pos-pricing / pos-payment ไม่ได้ port ทีละข้อ เพราะ golden fixtures สร้างจากกรณีเดียวกันครบ — เพิ่ม `PosRulesTest` สำหรับตัวช่วยที่ fixtures ไม่เรียกตรง
 
 ### ขั้น 8 — กะ + ล็อก POS + บิลพัก (E48)
 - **ก่อนเริ่ม**: แก้ spec ใน `../FrontEnd-An22` เรื่องจำกัดช่วงวันที่ / เพดานแถว (หัวข้อ "จำกัดขนาดคำตอบ") — ถามข้อความ + ตัวเลขกับผู้ใช้ก่อน

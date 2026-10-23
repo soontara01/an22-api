@@ -1,18 +1,21 @@
 package com.an22.api.rules;
 
+import com.an22.api.model.Category;
 import com.an22.api.model.Promotion;
 import com.an22.api.model.Promotion.Discount;
 import com.an22.api.model.Promotion.FreeGoods;
 import com.an22.api.model.Promotion.FreeItem;
 import com.an22.api.model.Promotion.Scope;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
 
 /**
  * port จาก {@code core/models/promotion.model.ts} (ส่วน master: สถานะ / สาขา / {@code promotionError()}) + {@code normalize} ของ
- * {@code handlePromotions} ใน mock. ส่วนคิดราคา (discountAmount / inScope / promotionsForProduct) มากับ POS ขั้น 9.
+ * {@code handlePromotions} ใน mock + {@code discountAmount()} / {@code inScope()} ที่ {@link PosPricing} ใช้.
  */
 public final class PromotionRules {
 
@@ -52,6 +55,36 @@ public final class PromotionRules {
         p.note() == null ? "" : p.note(), type, p.startDate(), p.endDate() == null || p.endDate().isEmpty() ? null : p.endDate(),
         p.enabled() == null || p.enabled(), p.priority() != null ? p.priority() : 0.0, Boolean.TRUE.equals(p.stackable()), scope,
         p.minQty() != null ? p.minQty() : 1.0, p.minAmount() != null ? p.minAmount() : 0.0, discount, free, orEmpty(p.branchIds()));
+  }
+
+  /** {@code discountAmount()}: บาทที่ลดจาก {@code base} (ราคาต่อหน่วยของโปรสินค้า / ยอดบิลของโปรท้ายบิล) ไม่เกิน base. */
+  public static double discountAmount(double base, Discount d) {
+    if (base <= 0) {
+      return 0;
+    }
+    double raw = "percent".equals(d.kind()) ? (base * d.value()) / 100 : d.value();
+    double capped = "percent".equals(d.kind()) && d.maxDiscount() != null ? Math.min(raw, d.maxDiscount()) : raw;
+    return Money.round2(Math.min(capped, base));
+  }
+
+  /** {@code inScope()}: SKU เป็นสินค้าร่วมรายการของโปร — หมวดครอบคลุมหมวดลูกทั้งหมด (ไล่ขึ้นหาแม่). */
+  public static boolean inScope(Promotion promo, long productId, Long categoryId, List<Category> categories) {
+    if ("bill_discount".equals(promo.type()) || Boolean.TRUE.equals(promo.scope().all())) {
+      return true;
+    }
+    if (promo.scope().productIds().contains(productId)) {
+      return true;
+    }
+    Map<Long, Category> byId = new HashMap<>();
+    for (Category c : categories) {
+      byId.put(c.id(), c);
+    }
+    for (Category c = categoryId == null ? null : byId.get(categoryId); c != null; c = c.parentId() == null ? null : byId.get(c.parentId())) {
+      if (promo.scope().categoryIds().contains(c.id())) {
+        return true;
+      }
+    }
+    return false;
   }
 
   /** {@code inBranch()}: ไม่จำกัดสาขา = ทุกสาขา; จำกัดแล้วใช้เฉพาะสาขาในรายการ (สาขาไม่รู้ = ไม่ใช้). */
