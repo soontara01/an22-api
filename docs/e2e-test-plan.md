@@ -64,7 +64,7 @@
 **ผล** 2026-10-23 · commit `e3202ef` · ✅ ผ่าน
 - ✅ unit (surefire) 225 ผ่าน, failures 0 / errors 0 / skipped 0
 - ✅ integration (failsafe) 167 ผ่าน, failures 0 / errors 0 / skipped 0
-- ✅ BUILD SUCCESS, Total time 03:40 min (เริ่ม 21:55 จบ 21:58 +07:00), ตอนรันไม่มี stack `an22-multi` เปิดอยู่
+- ✅ BUILD SUCCESS, Total time 01:26 min (เริ่ม 21:55:01 จบ 21:56:29 +07:00), ตอนรันไม่มี stack `an22-multi` เปิดอยู่
 
 ### ข้อ 2 — โครงพื้นฐาน 2 instance + load balancer
 | case | ทำอะไร | api คาดหวัง | DB คาดหวัง |
