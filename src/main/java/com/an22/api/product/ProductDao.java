@@ -42,6 +42,16 @@ public class ProductDao {
     return withChildren(rows, null);
   }
 
+  /** SKU ตามรายการ id ที่สาขานี้ (คิดราคาตะกร้า — เฉพาะที่ตะกร้า / ของแถมอ้าง). */
+  public List<Product> listAt(long branchId, List<Long> ids) {
+    if (ids.isEmpty()) {
+      return List.of();
+    }
+    List<Row> rows = jdbc.sql(SELECT_AT + " WHERE p.id = ANY (:ids) ORDER BY p.id").param("branch", branchId)
+        .param("ids", ids.toArray(Long[]::new)).query(ProductDao::row).list();
+    return withChildren(rows, null);
+  }
+
   public Optional<Product> findAt(long id, long branchId) {
     List<Row> rows = jdbc.sql(SELECT_AT + " WHERE p.id = :id").param("branch", branchId).param("id", id).query(ProductDao::row).list();
     return withChildren(rows, id).stream().findFirst();

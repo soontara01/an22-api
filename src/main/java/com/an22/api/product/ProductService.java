@@ -19,6 +19,7 @@ import com.an22.api.model.StockCardResult;
 import com.an22.api.model.Supplier;
 import com.an22.api.price.PriceDao;
 import com.an22.api.promotion.PromotionDao;
+import com.an22.api.sale.SaleDao;
 import com.an22.api.transfer.TransferDao;
 import com.an22.api.rules.CategoryRules;
 import com.an22.api.rules.Costing;
@@ -67,9 +68,12 @@ public class ProductService {
   private final PromotionDao promotions;
   private final Clock clock;
   private final TransferDao transfers;
+  private final SaleDao sales;
 
   ProductService(ProductDao dao, CategoryDao categories, SupplierDao suppliers, BranchDao branches, StockDao stock, SerialDao serials,
-      StockLedger ledger, TenantLocks locks, Audit audit, PriceDao prices, PromotionDao promotions, Clock clock, TransferDao transfers) {
+      StockLedger ledger, TenantLocks locks, Audit audit, PriceDao prices, PromotionDao promotions, Clock clock, TransferDao transfers,
+      SaleDao sales) {
+    this.sales = sales;
     this.transfers = transfers;
     this.prices = prices;
     this.promotions = promotions;
@@ -140,7 +144,7 @@ public class ProductService {
     return at(id, branch);
   }
 
-  /** ลบได้เมื่อไม่มีของสาขาใด และไม่อยู่ในโปรที่ยังไม่หมดอายุ (มีการขาย → ขั้น 9); ช่วงราคาของ SKU ลบตามไปด้วย. */
+  /** ลบได้เมื่อไม่มีของสาขาใด (รวมระหว่างโอน), ไม่เคยขาย และไม่อยู่ในโปรที่ยังไม่หมดอายุ; ช่วงราคาของ SKU ลบตามไปด้วย. */
   @Transactional
   public void delete(long id) {
     locks.lock(PRODUCTS);
@@ -148,6 +152,9 @@ public class ProductService {
     String stocked = stockedNote(id);
     if (!stocked.isEmpty()) {
       throw ApiException.badRequest("ยังมีสต็อกคงเหลือ" + stocked + " ลบไม่ได้");
+    }
+    if (sales.productSold(id)) {
+      throw ApiException.badRequest("SKU นี้มีประวัติการขาย ลบไม่ได้ (เปลี่ยนสถานะเป็นเลิกจำหน่ายแทน)");
     }
     List<String> usedBy = promotions.codesUsingProduct(id, today());
     if (!usedBy.isEmpty()) {

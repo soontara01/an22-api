@@ -56,7 +56,7 @@ src/main/java/com/an22/api/
   rules/         กฎที่ port จาก core/models — pure Java ไม่ผูก Spring, 1 class ต่อ 1 ไฟล์ TS (UserRules, CompanyRules, StoreInfoRules, MenuAccessRules,
                  PlanRules, CostVisibility, SubscriptionRules, CategoryRules, Suppliers, PaymentMethodRules, PosTerminalRules, Money, ProductRules,
                  Costing, SerialRules, PriceRules, PromotionRules, TransferRules, PosPricing, PosPayment — ผลตรง golden fixtures ผ่าน FixturesTest,
-                 ListLimits, ShiftRules)
+                 ListLimits, ShiftRules, SaleRules, TaxInvoiceRules)
   health/        /healthz, /readyz
   auth/          login / verify / me (AuthController → AuthService / SessionService → SessionDao), LoginThrottle (+ Dao), ShopSession, PasswordResetTokens
   platform/      /platform/auth/login, /platform/me
@@ -68,6 +68,7 @@ src/main/java/com/an22/api/
   transfer/      /transfers (+ receive, cancel) — เลข TR-<สาขา>-YYYYMMDD-NNNN, ล็อกแถวใบโอนก่อนรับ / ยกเลิก
   stock/         StockLedger (จุดเดียวที่แก้สต็อก), StockDao (branch_stock + stock_movements), SerialDao
   pos/           /pos-terminals, /pos/held-bills (เข้ารหัสทั้งบิล)
+  sale/          /sales (+ void, status, cost-check), ใบกำกับเต็มรูป + /tax-invoices — SaleService (ลำดับตรวจ 1–8), TaxInvoiceService.create()
   shift/         /shifts/* (เจ้าของกะ = cashier_user_id; ยอดระบบจาก ShiftService.context()), ล็อกหน้าจอ E48
   company/       /settings/* (SettingsController → SettingsService → CompanyInfoDao / MenuAccessDao), /company/owner, PlanLimits
   user/          /users (+ password); UserDao.SELECT / row ใช้ร่วมกับ SessionDao

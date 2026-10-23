@@ -6,6 +6,7 @@ import com.an22.api.model.CategoryPayload;
 import com.an22.api.model.PaymentMethod;
 import com.an22.api.model.Supplier;
 import com.an22.api.promotion.PromotionDao;
+import com.an22.api.sale.SaleDao;
 import com.an22.api.rules.CategoryRules;
 import com.an22.api.rules.PaymentMethodRules;
 import com.an22.api.rules.Suppliers;
@@ -20,7 +21,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 /**
  * ข้อมูลหลักที่ไม่ขึ้นกับ SKU (ขั้น 4): หมวดหมู่, ผู้จำหน่าย, ช่องทางชำระเงิน — อ่านได้ทุกคน, เขียน: admin (controller ตรวจ).
- * กฎตาม {@code handleCategories / handleSuppliers / handlePaymentMethods} ของ mock. ตรวจที่ต้องรู้การขาย มาในขั้น 9.
+ * กฎตาม {@code handleCategories / handleSuppliers / handlePaymentMethods} ของ mock.
  */
 @Service
 public class MasterDataService {
@@ -36,9 +37,11 @@ public class MasterDataService {
   private final TenantLocks locks;
   private final PromotionDao promotions;
   private final Clock clock;
+  private final SaleDao sales;
 
   MasterDataService(CategoryDao categories, SupplierDao suppliers, PaymentMethodDao methods, TenantLocks locks, PromotionDao promotions,
-      Clock clock) {
+      Clock clock, SaleDao sales) {
+    this.sales = sales;
     this.promotions = promotions;
     this.clock = clock;
     this.categories = categories;
@@ -178,6 +181,9 @@ public class MasterDataService {
     methods.find(id).orElseThrow(() -> ApiException.notFound(METHOD_NOT_FOUND));
     if (PaymentMethodRules.isLastActiveCash(methods.list(), id)) {
       throw ApiException.badRequest("ต้องมีช่องทางเงินสดที่เปิดใช้งานอย่างน้อย 1 ช่องทาง ลบไม่ได้");
+    }
+    if (sales.methodUsed(id)) {
+      throw ApiException.badRequest("มีการขายที่ใช้ช่องทางนี้แล้ว ลบไม่ได้ (ปิดใช้งานแทน)");
     }
     methods.delete(id);
   }

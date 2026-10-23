@@ -1,6 +1,6 @@
 # แผนทำ an22-api (C2) — ทีละขั้นย่อย
 
-สถานะ: ขั้น 8 เสร็จ 2026-10-23 — รอผู้ใช้ก่อนเริ่มขั้น 9
+สถานะ: ขั้น 9 เสร็จ 2026-10-23 — รอผู้ใช้ก่อนเริ่มขั้น 10
 
 ## บริบท
 
@@ -454,7 +454,7 @@ api รันได้หลาย instance หลัง load balancer โดย
   - count-check ไม่บันทึกอะไร (เหมือน mock — contract แนะนำให้ log การนับครั้งแรก: ยังไม่ทำ)
   - ยังไม่ทำ: ขายระหว่างกะถูกล็อก → 400 "หน้าจอถูกล็อก — ปลดล็อกก่อน" และ `shiftBlocker` ของการขาย / void / คืน (ขั้น 9 / 10)
 
-### ขั้น 9 — ขาย + ใบกำกับภาษี
+### ขั้น 9 — ขาย + ใบกำกับภาษี ✅ เสร็จ 2026-10-23
 - **ก่อนเริ่ม**: แก้ spec ใน `../FrontEnd-An22` เรื่องห้ามเลขบัตรเต็มใน `reference` (หัวข้อ "ข้อมูลส่วนบุคคล") — ถามข้อความ error กับผู้ใช้ก่อน
 - migration: `sales`, `sale_lines`, `sale_payments`, `tax_invoices` (`buyer_enc` + `buyer_tax_id_hash`)
 - `POST /sales` ตามลำดับตรวจ 1–8 ใน `api-contract.md` → ตัดสต็อกพร้อม COGS (`issueStock`), เลข `POS-<สาขา>-<เครื่อง>-YYYYMMDD-NNNN`, snapshot; ขายระหว่างกะถูกล็อก → 400
@@ -462,6 +462,18 @@ api รันได้หลาย instance หลัง load balancer โดย
 - ใบกำกับ: `POST /sales/:id/tax-invoice`, `reissue`, `GET …/tax-invoice(s)`, `GET /tax-invoices`, `GET /tax-invoices/buyer` — กฎ `TaxInvoiceRules`, `SaleRules`
 - audit `manual_discount`, `sale_void`, `tax_invoice_reissue`; seed บิลตัวอย่างตาม `SEED_SALES`
 - test: ลำดับข้อความ error ตรง mock, ขายพร้อมกัน 2 thread เลขไม่ซ้ำ, COGS + movement, ทุนเป็น null สำหรับ user
+- ผลที่ทำ (รายละเอียดที่แผนไม่ได้ระบุ):
+  - ก่อนเริ่ม: ข้อความเลขบัตรเต็มตกลงแล้ว → `isFullCardNumber()` ใน `paymentError()` (FrontEnd-An22 `59e52fe` branch `docs/card-number-reference`
+    ยังไม่ push: model + spec + fixtures payment.json +2 เคส + api-contract) — api port ตามแล้ว (fixtures 59 เคสผ่าน)
+  - V8: `dt_sales` (+ `dt_sale_lines` / `dt_sale_payments` append-only, product_id / method_id ไม่มี FK), `dt_tax_invoices`
+    (`buyer_enc` PiiCipher AAD `dt_tax_invoices.buyer:<tenant>`, `buyer_tax_id_hash` = `hashTaxId`, partial unique 1 ใบที่ใช้ได้ต่อบิล); seed `SEED_SALES` 7 ออร์เดอร์ก่อน POS
+  - `POST /sales` ลำดับ 1–8 ตาม contract + ล็อกหน้าจอ (หลังข้อ 1) — ตะกร้าคิดด้วย SKU ที่ตะกร้า / ของแถมของโปรอ้างเท่านั้น (ไม่โหลดทั้งร้าน);
+    ตัดสต็อกผ่าน `StockLedger` เรียงตาม productId, serial ตัดด้วย `takeOut(… 'sold')` (ถูกขายตัดหน้า → 400); เลข `POS-<สาขา>-<เครื่อง>-YYYYMMDD-NNNN`
+  - void: ไม่ใช่ admin ไม่มีผู้อนุมัติ → 403, รหัสผิด → 400 (นับใน LoginThrottle); คืนสต็อกที่สาขาที่ขาย (serial `returnSold`, อื่นที่ COGS / หน่วย)
+  - ใบกำกับ: `TaxInvoiceService.create()` ใช้ทั้งตอนขายและออกทีหลัง; ออกใหม่ = ยกเลิกใบเดิม (เหตุผล + replacedByNo) ก่อน insert ใบใหม่
+  - `GET /sales/:id/tax-invoice` ไม่มีใบ / `GET /tax-invoices/buyer` ไม่พบ = body ว่าง (null)
+  - ยอดระบบของกะรวมบิลที่ขาย / void ในกะแล้ว (`SaleDao.shiftRefs`); ลบ SKU ที่เคยขาย / ช่องทางที่ใช้แล้ว / เครื่องที่มีบิล → 400
+  - returnStatus / creditedTotal / creditNoteNos / exchangeNos ยังตอบค่าว่าง และ `currentSerial()` ยังไม่ดูใบเปลี่ยน — ขั้น 10
 
 ### ขั้น 10 — ใบลดหนี้ + ใบเปลี่ยน
 - migration: `credit_notes` (`buyer_enc` เหมือนใบกำกับ; + lines / deductions / refunds), `exchanges` (+ lines); กฎ `CreditNoteRules` (`draftCreditNote`, …), `ExchangeRules`
@@ -496,7 +508,7 @@ api รันได้หลาย instance หลัง load balancer โดย
 2. ~~ขั้น 5: ทุนเฉลี่ย~~ — ตอบแล้ว 2026-10-22: `numeric(14,4)`
 3. ขั้น 10: เพิ่ม fixtures `credit-note.json` ฝั่งหน้าบ้านก่อนหรือไม่
 4. ขั้น 12: `GET /platform/outbox` ไม่มีใน api จริง — หน้า platform ต้องซ่อนเมนูนี้เมื่อไม่ใช่ mock หรือไม่
-5. ขั้น 9: ข้อความ error เมื่อ `reference` เป็นเลขบัตรเต็ม (แก้ spec หน้าบ้านก่อน)
+5. ~~ขั้น 9: ข้อความ error เมื่อ `reference` เป็นเลขบัตรเต็ม~~ — ตอบแล้ว 2026-10-23: "<ช่องทาง>: ห้ามกรอกเลขบัตรเต็ม — กรอกเฉพาะเลขอนุมัติหรือเลขบัตร 4 หลักท้าย" ใน `paymentError()` (หน้าบ้าน + server ใช้กฎเดียวกัน, เพิ่มเคสใน fixtures)
 6. ก่อนขั้น 8: ข้อความ error + ตัวเลข (ช่วงวันที่สูงสุด, `MAX_LIST_ROWS`, `statement_timeout`) ของการจำกัดขนาดคำตอบ (แก้ spec หน้าบ้านก่อน)
 7. ระยะเก็บเอกสารภาษีก่อน purge (E39) — ยังรอนักบัญชี: purge ตามเดิมไปก่อน
 

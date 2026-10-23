@@ -108,6 +108,9 @@ public final class PosPayment {
       if (!isMoney(amount)) {
         return method.name() + ": จำนวนเงินไม่ถูกต้อง";
       }
+      if (isFullCardNumber(input.reference())) {
+        return method.name() + ": ห้ามกรอกเลขบัตรเต็ม — กรอกเฉพาะเลขอนุมัติหรือเลขบัตร 4 หลักท้าย";
+      }
       if (PaymentMethodRules.allowsChange(method.type())) {
         cashLines++;
         continue;
@@ -153,6 +156,28 @@ public final class PosPayment {
   /** {@code baht()} ของ pos-payment: {@code ฿} + {@link Money#enNumber}. */
   public static String baht(double n) {
     return "฿" + Money.enNumber(n);
+  }
+
+  /**
+   * {@code isFullCardNumber()}: เลขบัตรเต็ม (PAN) ในช่องอ้างอิง = ตัวเลข 13–19 หลักหลังตัดช่องว่าง / '-' ที่ผ่าน Luhn — ห้ามเก็บ (PCI DSS).
+   */
+  public static boolean isFullCardNumber(String reference) {
+    String digits = reference == null ? "" : reference.replaceAll("[\\s-]", "");
+    if (!digits.matches("\\d{13,19}")) {
+      return false;
+    }
+    int sum = 0;
+    for (int i = 0; i < digits.length(); i++) {
+      int d = digits.charAt(digits.length() - 1 - i) - '0';
+      if (i % 2 == 1) {
+        d *= 2;
+        if (d > 9) {
+          d -= 9;
+        }
+      }
+      sum += d;
+    }
+    return sum % 10 == 0;
   }
 
   private static double amount(PaymentInput input) {

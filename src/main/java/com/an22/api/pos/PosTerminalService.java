@@ -5,6 +5,7 @@ import com.an22.api.auth.ShopSession;
 import com.an22.api.branch.BranchDao;
 import com.an22.api.company.PlanLimits;
 import com.an22.api.db.TenantLocks;
+import com.an22.api.sale.SaleDao;
 import com.an22.api.shift.ShiftDao;
 import com.an22.api.model.Branch;
 import com.an22.api.model.PosTerminal;
@@ -33,8 +34,11 @@ public class PosTerminalService {
   private final Audit audit;
 
   private final ShiftDao shifts;
+  private final SaleDao sales;
 
-  PosTerminalService(PosTerminalDao dao, BranchDao branches, TenantLocks locks, PlanLimits limits, Audit audit, ShiftDao shifts) {
+  PosTerminalService(PosTerminalDao dao, BranchDao branches, TenantLocks locks, PlanLimits limits, Audit audit, ShiftDao shifts,
+      SaleDao sales) {
+    this.sales = sales;
     this.shifts = shifts;
     this.dao = dao;
     this.branches = branches;
@@ -92,8 +96,8 @@ public class PosTerminalService {
     if (notMine(s, branches.list(), current.branchId())) {
       throw ApiException.forbidden(BRANCH_ONLY);
     }
-    // มีกะ (ขั้น 9: + บิล / ใบลดหนี้ / ใบเปลี่ยน) = เอกสารอ้างอยู่
-    if (shifts.terminalUsed(id)) {
+    // มีกะ / บิล (ขั้น 10: + ใบลดหนี้ / ใบเปลี่ยน) = เอกสารอ้างอยู่
+    if (shifts.terminalUsed(id) || sales.terminalUsed(id)) {
       throw ApiException.badRequest("เครื่อง " + id + " มีกะหรือเอกสารแล้ว ลบไม่ได้ (ปิดใช้งานแทน)");
     }
     dao.delete(id);
