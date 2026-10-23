@@ -5,6 +5,7 @@ import com.an22.api.auth.ShopSession;
 import com.an22.api.branch.BranchDao;
 import com.an22.api.company.PlanLimits;
 import com.an22.api.db.TenantLocks;
+import com.an22.api.shift.ShiftDao;
 import com.an22.api.model.Branch;
 import com.an22.api.model.PosTerminal;
 import com.an22.api.rules.PlanRules.LimitKind;
@@ -17,7 +18,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 /**
  * ทะเบียนเครื่อง POS (T1 / T5 / E8) — เขียน: admin บริษัท หรือ admin ของสาขาของเครื่อง (ย้ายสาขาต้องมีสิทธิ์ทั้งสองสาขา). ปิดเครื่องที่มีกะเปิด /
- * ลบเครื่องที่มีกะหรือเอกสาร → 400 มาในขั้น 8 / 9.
+ * ลบเครื่องที่มีกะ → 400 (เอกสารการขายเติมในขั้น 9).
  */
 @Service
 public class PosTerminalService {
@@ -31,7 +32,10 @@ public class PosTerminalService {
   private final PlanLimits limits;
   private final Audit audit;
 
-  PosTerminalService(PosTerminalDao dao, BranchDao branches, TenantLocks locks, PlanLimits limits, Audit audit) {
+  private final ShiftDao shifts;
+
+  PosTerminalService(PosTerminalDao dao, BranchDao branches, TenantLocks locks, PlanLimits limits, Audit audit, ShiftDao shifts) {
+    this.shifts = shifts;
     this.dao = dao;
     this.branches = branches;
     this.locks = locks;
@@ -70,6 +74,12 @@ public class PosTerminalService {
       throw ApiException.forbidden(BRANCH_ONLY);
     }
     badRequest(PosTerminalRules.posTerminalError(next, dao.list().stream().filter(t -> t.id() != id).toList(), all));
+    if (!next.active()) {
+      locks.lock(TenantLocks.SHIFTS);
+      if (shifts.openOfTerminal(id).isPresent()) {
+        throw ApiException.badRequest("เครื่อง " + id + " มีกะที่เปิดอยู่ ปิดใช้งานไม่ได้");
+      }
+    }
     limits.check(s, LimitKind.TERMINALS, next.active(), current.active());
     dao.update(next);
     record(s, next, "แก้");
@@ -81,6 +91,10 @@ public class PosTerminalService {
     PosTerminal current = dao.find(id).orElseThrow(() -> ApiException.notFound(NOT_FOUND));
     if (notMine(s, branches.list(), current.branchId())) {
       throw ApiException.forbidden(BRANCH_ONLY);
+    }
+    // มีกะ (ขั้น 9: + บิล / ใบลดหนี้ / ใบเปลี่ยน) = เอกสารอ้างอยู่
+    if (shifts.terminalUsed(id)) {
+      throw ApiException.badRequest("เครื่อง " + id + " มีกะหรือเอกสารแล้ว ลบไม่ได้ (ปิดใช้งานแทน)");
     }
     dao.delete(id);
     audit.record(s, "terminal_change", null, "terminal", (long) id, "เครื่อง " + id, "ลบเครื่อง");

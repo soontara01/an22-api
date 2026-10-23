@@ -55,7 +55,8 @@ src/main/java/com/an22/api/
   model/         record ของ JSON = interface TS (User, Branch, Company, Session, LoginResponse, BillingInvoice …)
   rules/         กฎที่ port จาก core/models — pure Java ไม่ผูก Spring, 1 class ต่อ 1 ไฟล์ TS (UserRules, CompanyRules, StoreInfoRules, MenuAccessRules,
                  PlanRules, CostVisibility, SubscriptionRules, CategoryRules, Suppliers, PaymentMethodRules, PosTerminalRules, Money, ProductRules,
-                 Costing, SerialRules, PriceRules, PromotionRules, TransferRules, PosPricing, PosPayment — ผลตรง golden fixtures ผ่าน FixturesTest)
+                 Costing, SerialRules, PriceRules, PromotionRules, TransferRules, PosPricing, PosPayment — ผลตรง golden fixtures ผ่าน FixturesTest,
+                 ListLimits, ShiftRules)
   health/        /healthz, /readyz
   auth/          login / verify / me (AuthController → AuthService / SessionService → SessionDao), LoginThrottle (+ Dao), ShopSession, PasswordResetTokens
   platform/      /platform/auth/login, /platform/me
@@ -66,7 +67,8 @@ src/main/java/com/an22/api/
   promotion/     /promotions (scope / สาขาเป็น bigint[], ส่วนลด / ของแถมเป็น jsonb ไม่มี FK), codesUsingProduct / codesUsingCategory (กันลบ)
   transfer/      /transfers (+ receive, cancel) — เลข TR-<สาขา>-YYYYMMDD-NNNN, ล็อกแถวใบโอนก่อนรับ / ยกเลิก
   stock/         StockLedger (จุดเดียวที่แก้สต็อก), StockDao (branch_stock + stock_movements), SerialDao
-  pos/           /pos-terminals (ขั้น 8: กะ / ล็อก / บิลพัก)
+  pos/           /pos-terminals, /pos/held-bills (เข้ารหัสทั้งบิล)
+  shift/         /shifts/* (เจ้าของกะ = cashier_user_id; ยอดระบบจาก ShiftService.context()), ล็อกหน้าจอ E48
   company/       /settings/* (SettingsController → SettingsService → CompanyInfoDao / MenuAccessDao), /company/owner, PlanLimits
   user/          /users (+ password); UserDao.SELECT / row ใช้ร่วมกับ SessionDao
   audit/         Audit (บันทึกเหตุการณ์ของผู้ใช้ร้านใน transaction ของ service), AuditDao, AuditEntry

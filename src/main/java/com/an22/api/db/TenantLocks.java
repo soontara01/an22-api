@@ -12,6 +12,8 @@ public class TenantLocks {
 
   /** ล็อกการเปลี่ยนผู้ใช้ / สาขา / เครื่อง POS ของบริษัท (ทุกอย่างที่แพ็กเกจนับ) — เรียกก่อนอ่านข้อมูลที่จะตรวจกฎ. */
   public static final String ACCOUNTS = "accounts";
+  /** ล็อกการเปิดกะ / ปิดระบบกะ / ปิดสาขา-เครื่องที่อาจมีกะเปิด (เรียงหลัง ACCOUNTS เสมอ — เปิดกะไม่ถือ ACCOUNTS). */
+  public static final String SHIFTS = "shifts";
 
   private final JdbcClient jdbc;
 

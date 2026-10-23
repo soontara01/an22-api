@@ -4,6 +4,7 @@ import com.an22.api.audit.Audit;
 import com.an22.api.auth.ShopSession;
 import com.an22.api.company.PlanLimits;
 import com.an22.api.db.TenantLocks;
+import com.an22.api.shift.ShiftDao;
 import com.an22.api.model.Branch;
 import com.an22.api.model.BranchPayload;
 import com.an22.api.rules.CompanyRules;
@@ -24,7 +25,10 @@ public class BranchService {
   private final PlanLimits limits;
   private final Audit audit;
 
-  BranchService(BranchDao dao, TenantLocks locks, PlanLimits limits, Audit audit) {
+  private final ShiftDao shifts;
+
+  BranchService(BranchDao dao, TenantLocks locks, PlanLimits limits, Audit audit, ShiftDao shifts) {
+    this.shifts = shifts;
     this.dao = dao;
     this.locks = locks;
     this.limits = limits;
@@ -65,6 +69,12 @@ public class BranchService {
     String problem = CompanyRules.branchError(id, payload, dao.list());
     if (problem != null) {
       throw ApiException.badRequest(problem);
+    }
+    if (!payload.active()) {
+      locks.lock(TenantLocks.SHIFTS);
+      if (shifts.openInBranch(id)) {
+        throw ApiException.badRequest("สาขา " + current.code() + " มีกะที่เปิดอยู่ ปิดใช้งานไม่ได้");
+      }
     }
     limits.check(s, LimitKind.BRANCHES, payload.active(), current.active());
     Branch branch = dao.update(id, payload);

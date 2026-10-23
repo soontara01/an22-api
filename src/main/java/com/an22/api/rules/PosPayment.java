@@ -3,14 +3,9 @@ package com.an22.api.rules;
 import com.an22.api.model.PaymentInput;
 import com.an22.api.model.PaymentMethod;
 import com.an22.api.model.SalePayment;
-import java.math.BigDecimal;
-import java.math.RoundingMode;
-import java.text.DecimalFormat;
-import java.text.DecimalFormatSymbols;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 
 /**
@@ -155,14 +150,9 @@ public final class PosPayment {
     return null;
   }
 
-  /**
-   * {@code ฿} + {@code toLocaleString('en-US', { maximumFractionDigits: 2 })}: คั่นหลักพัน, ทศนิยมไม่เกิน 2 ไม่เติม 0, ปัดครึ่งออกจากศูนย์
-   * (halfExpand ของ Intl) บนค่าทศนิยมที่สั้นที่สุดของ double (เหมือน JS).
-   */
+  /** {@code baht()} ของ pos-payment: {@code ฿} + {@link Money#enNumber}. */
   public static String baht(double n) {
-    DecimalFormat format = new DecimalFormat("#,##0.##", DecimalFormatSymbols.getInstance(Locale.ROOT));
-    format.setRoundingMode(RoundingMode.HALF_UP);
-    return "฿" + format.format(BigDecimal.valueOf(n));
+    return "฿" + Money.enNumber(n);
   }
 
   private static double amount(PaymentInput input) {

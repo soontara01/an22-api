@@ -112,15 +112,22 @@ public class AuthService {
    */
   @Transactional(readOnly = true)
   public User verify(ShopSession session, VerifyRequest req, String ip) {
-    String username = UserRules.normalizeUsername(req.username());
+    return credentials(session, req.username(), req.password(), ip).orElseThrow(() -> ApiException.badRequest(WRONG_LOGIN));
+  }
+
+  /**
+   * รหัสของผู้ใช้ในบริษัทของ session (ปลดล็อก POS, ผู้อนุมัติส่วนต่าง — E48) — นับผิดใน {@link LoginThrottle} แบบเดียวกับ login
+   * (ล็อกอยู่ → 429); ผิด = empty (ผู้เรียกเลือกข้อความ 400 เอง). ทำงานใน transaction ของผู้เรียก.
+   */
+  public Optional<User> credentials(ShopSession session, String usernameIn, String password, String ip) {
+    String username = UserRules.normalizeUsername(usernameIn == null ? "" : usernameIn);
     List<ThrottleKey> keys = List.of(ThrottleKey.shop(session.companyCode(), username), ThrottleKey.ip(ip));
     throttle.check(keys);
-    Optional<User> user = check(Via.APP, session.tenantId(), username, req.password());
+    Optional<User> user = check(Via.APP, session.tenantId(), username, password);
     if (user.isEmpty()) {
       throttle.fail(keys, null);
-      throw ApiException.badRequest(WRONG_LOGIN);
     }
-    return user.get();
+    return user;
   }
 
   /** ผู้ใช้ที่ใช้งานอยู่และรหัสตรง ({@code checkCredentials()} ของ mock) — ผู้ใช้ปิดใช้งาน = รหัสผิด (E3). */

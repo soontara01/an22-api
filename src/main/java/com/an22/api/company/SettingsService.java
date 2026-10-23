@@ -9,6 +9,9 @@ import com.an22.api.model.CompanyInfo;
 import com.an22.api.model.MenuAccess;
 import com.an22.api.model.StoreInfo;
 import com.an22.api.rules.CompanyRules;
+import com.an22.api.db.TenantLocks;
+import com.an22.api.rules.ShiftRules;
+import com.an22.api.shift.ShiftDao;
 import com.an22.api.rules.MenuAccessRules;
 import com.an22.api.rules.StoreInfoRules;
 import com.an22.api.web.ApiException;
@@ -27,8 +30,12 @@ public class SettingsService {
   private final MenuAccessDao menus;
   private final BranchDao branches;
   private final Audit audit;
+  private final ShiftDao shifts;
+  private final TenantLocks locks;
 
-  SettingsService(CompanyInfoDao company, MenuAccessDao menus, BranchDao branches, Audit audit) {
+  SettingsService(CompanyInfoDao company, MenuAccessDao menus, BranchDao branches, Audit audit, ShiftDao shifts, TenantLocks locks) {
+    this.shifts = shifts;
+    this.locks = locks;
     this.company = company;
     this.menus = menus;
     this.branches = branches;
@@ -40,11 +47,14 @@ public class SettingsService {
     return company.get();
   }
 
-  /** {@code PUT /settings/company} (admin บริษัท — controller ตรวจ). ({@code requireShiftChangeError()} มาในขั้น 8) */
+  /** {@code PUT /settings/company} (admin บริษัท — controller ตรวจ): ปิดระบบกะได้เมื่อไม่มีกะเปิด ({@code requireShiftChangeError()}). */
   @Transactional
   public CompanyInfo updateCompanyInfo(ShopSession s, CompanyInfo in) {
     CompanyInfo info = CompanyRules.normalizeCompanyInfo(in);
     String problem = CompanyRules.companyInfoError(info);
+    if (problem == null) {
+      problem = requireShiftProblem(info.requireShift());
+    }
     if (problem != null) {
       throw ApiException.badRequest(problem);
     }
@@ -76,6 +86,9 @@ public class SettingsService {
   public StoreInfo updateStoreInfo(ShopSession s, BranchContext ctx, StoreInfo in) {
     StoreInfo payload = StoreInfoRules.normalizeStoreInfo(in);
     String problem = StoreInfoRules.storeInfoError(payload);
+    if (problem == null) {
+      problem = requireShiftProblem(payload.requireShift());
+    }
     if (problem != null) {
       throw ApiException.badRequest(problem);
     }
@@ -89,6 +102,16 @@ public class SettingsService {
     Branch saved = branches.update(branch.id(), details);
     recordCompanySettings(s, info);
     return CompanyRules.storeInfoOf(company.get(), saved);
+  }
+
+  /** {@code requireShiftProblem()} ของ mock: ปิดระบบกะขณะมีกะเปิดไม่ได้ — ล็อก "shifts" กันเปิดกะพร้อมกัน. */
+  private String requireShiftProblem(boolean next) {
+    boolean current = Boolean.TRUE.equals(company.get().requireShift());
+    if (!current || next) {
+      return null;
+    }
+    locks.lock(TenantLocks.SHIFTS);
+    return ShiftRules.requireShiftChangeError(true, false, shifts.openCount());
   }
 
   @Transactional(readOnly = true)

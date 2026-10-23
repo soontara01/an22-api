@@ -1,6 +1,6 @@
 # แผนทำ an22-api (C2) — ทีละขั้นย่อย
 
-สถานะ: ขั้น 7 เสร็จ 2026-10-23 — รอผู้ใช้ก่อนเริ่มขั้น 8 (ต้องตกลงเรื่องจำกัดขนาดคำตอบก่อน)
+สถานะ: ขั้น 8 เสร็จ 2026-10-23 — รอผู้ใช้ก่อนเริ่มขั้น 9
 
 ## บริบท
 
@@ -432,12 +432,27 @@ api รันได้หลาย instance หลัง load balancer โดย
     `PricedLine` / `PricedCart` / `CartIssue` / `PaymentSummary` เป็น record ใน class ของกฎ
   - spec ของ pos-pricing / pos-payment ไม่ได้ port ทีละข้อ เพราะ golden fixtures สร้างจากกรณีเดียวกันครบ — เพิ่ม `PosRulesTest` สำหรับตัวช่วยที่ fixtures ไม่เรียกตรง
 
-### ขั้น 8 — กะ + ล็อก POS + บิลพัก (E48)
+### ขั้น 8 — กะ + ล็อก POS + บิลพัก (E48) ✅ เสร็จ 2026-10-23
 - **ก่อนเริ่ม**: แก้ spec ใน `../FrontEnd-An22` เรื่องจำกัดช่วงวันที่ / เพดานแถว (หัวข้อ "จำกัดขนาดคำตอบ") — ถามข้อความ + ตัวเลขกับผู้ใช้ก่อน
 - migration: `shifts` (+ `locked_at`, partial unique กะเปิด 1 กะต่อเครื่อง), `shift_counts`, `cash_movements`, `drawer_opens`, `shift_adjustments`, `held_bills` (`payload_enc bytea` — เข้ารหัส)
 - กฎ: `ShiftRules` ทั้งหมด (`shiftBlocker`, `openShiftError`, `countCheck`, `closeShiftError`, `shiftSummary`, `varianceReport`, …), `PosTerminalRules.terminalError`
 - endpoint: `/shifts/*` ทั้งหมด รวม `lock` / `unlock` (คนเปิดกะหรือ admin, ข้อความตาม contract), `/pos/held-bills`; เติม `requireShiftChangeError` ให้ `PUT /settings/store|company`, ปิดสาขา / เครื่องที่มีกะเปิด
 - audit `shift_close_other`, `shift_approve`, `shift_adjust`; test blind count (user ไม่เห็นยอด), P6 (user เห็นเฉพาะกะตัวเอง)
+- ผลที่ทำ (รายละเอียดที่แผนไม่ได้ระบุ):
+  - ก่อนเริ่ม: ตกลงตัวเลข / ข้อความกับผู้ใช้ + แก้ spec หน้าบ้าน + `ListLimits` (หัวข้อ "จำกัดขนาดคำตอบ") — commit แยก
+  - V7: `dt_shifts` (partial unique กะเปิด 1 ต่อเครื่อง **และ 1 ต่อคน**, `locked_at`), `dt_shift_counts` / `dt_cash_movements` / `dt_drawer_opens` /
+    `dt_shift_adjustments` (append-only), `dt_held_bills` (`payload_enc` = ทั้งบิลเข้ารหัสด้วย PiiCipher, AAD `dt_held_bills.payload:<tenant>`);
+    ยอดแบงก์ / เหรียญเป็น `jsonb`; `CashMovement.at` ฯลฯ = `created_at`
+  - **เจ้าของกะ = `cashier_user_id`** (เทียบด้วย id ไม่ใช่ชื่อแบบ mock — เปลี่ยนชื่อผู้ใช้แล้วกะไม่หลุดมือ); `cashier` = ชื่อ snapshot สำหรับแสดง / รายงาน
+  - `rules/ShiftRules` port ทั้งไฟล์ (ยกเว้น normalizeShift / shiftDay / shiftOpenTooLong ที่เป็นของหน้าจอ) + test ตาม spec เกือบทุกข้อ;
+    `Money.enNumber()` = `toLocaleString('en-US', max 2)` ใช้ร่วมกับ `PosPayment.baht()`
+  - ยอดระบบตอนนี้ = เงินทอนตั้งต้น + เงินเข้าออก — การขาย / void / ใบลดหนี้ / ใบเปลี่ยนเติมใน `ShiftService.context()` ขั้น 9 / 10
+  - เลขกะ `SH-<สาขาของเครื่อง>-YYYYMMDD-NN` (DocNumbers); `branch_id` ของกะ = สาขาของเครื่อง (E24)
+  - ปลดล็อก / ผู้อนุมัติตรวจรหัสผ่าน `AuthService.credentials()` (นับใน LoginThrottle เหมือน auth/verify — ล็อกอยู่ → 429)
+  - เปิดกะ / ปิดระบบกะ / ปิดสาขา-เครื่องที่มีกะเปิด ใช้ล็อก `TenantLocks.SHIFTS` (ถือหลัง ACCOUNTS เสมอ); ลบเครื่องที่มีกะ → 400
+  - `GET /shifts/current` ไม่มีกะ = body ว่าง (HttpClient อ่านเป็น null — เหมือน endpoint อื่นที่ mock ตอบ `null`)
+  - count-check ไม่บันทึกอะไร (เหมือน mock — contract แนะนำให้ log การนับครั้งแรก: ยังไม่ทำ)
+  - ยังไม่ทำ: ขายระหว่างกะถูกล็อก → 400 "หน้าจอถูกล็อก — ปลดล็อกก่อน" และ `shiftBlocker` ของการขาย / void / คืน (ขั้น 9 / 10)
 
 ### ขั้น 9 — ขาย + ใบกำกับภาษี
 - **ก่อนเริ่ม**: แก้ spec ใน `../FrontEnd-An22` เรื่องห้ามเลขบัตรเต็มใน `reference` (หัวข้อ "ข้อมูลส่วนบุคคล") — ถามข้อความ error กับผู้ใช้ก่อน
