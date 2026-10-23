@@ -413,6 +413,23 @@
 | 13.7 | cash1 ดูสินค้า / บัตรสต็อก / บิล ขณะ staffSeeCost=false → เปิด true | cost, avgCost, cogs, unitCost, balanceValue … = null → แสดง | — |
 | 13.8 | cash1 (มองไม่เห็นทุน) PUT สินค้าพร้อม cost 999 | 200 | cost ใน DB ไม่เปลี่ยน (E44) |
 
+**ผล** 2026-10-23 · commit `c48fe2d` (image เดียวกับข้อ 0) · `scripts/e2e/13-stock.sh` · ✅ 100 / ❌ 0
+- ✅ 13.1 TST-001 (ทุน 100) รับ 10 @200 → 10 @80 → stock 20 avgCost 140; `avg_cost` 140.0000; movement `receive` unit 200 / 80, total 2000 / 800, balance 10 / 20, value 2000 / 2800
+- ✅ 13.2 boss ตัด −5 " ชำรุด " → stock 15 avg 140; movement `issue` −5 total −700 balance_value 2100; audit `stock_out` "-5 — ชำรุด" (branch HQ)
+- ✅ 13.3 รับ +5 ไม่ส่ง unitCost → ใช้ทุนสินค้า 100 → avg 130 (130.0000, movement unit 100 total 500)
+- ✅ 13.4 delta 0 / 1.5 / ไม่ส่ง → `จำนวนไม่ถูกต้อง`, ทุน −1 → `ต้นทุนต้องไม่ติดลบ`, NB → `สินค้าคุม Serial ต้องรับเข้า/ตัดออกด้วย Serial`, SVC → `สินค้าบริการไม่มีสต็อก`,
+  ตัด 21 (มี 20) → `สต็อกคงเหลือไม่พอ`, cash1 ตัด → 403 `ตัดสต็อกออกได้เฉพาะผู้ดูแลระบบ` (cash1 รับเข้าได้ 200), สถานะห้ามสั่งซื้อ → `สถานะ "ห้ามสั่งซื้อ" ห้ามรับเข้าสินค้า`;
+  stock / avg / movement ไม่เปลี่ยนจากค่าผิด
+- ✅ 13.5 (movement แรกเลื่อนเป็นเมื่อวาน) ไม่มีช่วง → `กรุณาเลือกช่วงวันที่ (ไม่เกิน 366 วัน)`, > 366 วัน → `ช่วงวันที่ต้องไม่เกิน 366 วัน`, `2026-1-1` → `รูปแบบวันที่ต้องเป็น YYYY-MM-DD`,
+  mgr `?branchId=BN` → 403 `ไม่มีสิทธิ์ดูบัตรสต็อกของสาขานี้`; ถูก (@api2) → ยอดยกมา 10 / 200 / 2000, 5 รายการวันนี้ = `dt_stock_movements`, คงเหลือ 20 / 130 / 2600,
+  รวมรับ 16 / 1430 ตัด 6 / 830; บัตรของ BN ว่าง
+- ✅ 13.6 branch-stock MS = HQ 20 / 200, BN 5 / 220 (ไม่มีสาขาปิด); TST BN ไม่มีแถว = 0 / 0
+- ✅ 13.7 staffSeeCost=false: cash1 เห็นจำนวน แต่ cost / avgCost (สินค้า), avgCost / value / inCost / outCost / unitCost / totalCost / balanceAvgCost / balanceValue (บัตรสต็อก),
+  avgCost (branch-stock), cogs (บิล) = null; เปิด true → เห็นค่าจริงทุกตัว (ทุน 100 / 130, cogs 130, …)
+- ✅ 13.8 cash1 PUT ชื่อ + cost 999 → 200 (cost null ใน response), DB ชื่อเปลี่ยน cost คง 100.0000 (E44)
+- ✅ ตรวจร่วม: ไม่มี 5xx / ERROR, ไม่มีความลับใน log, ทุก error เป็น `{"message"}`
+- หมายเหตุ: `dt_stock_movements.unit_cost` เป็น `numeric(14,2)` ตรงกับแผน (บัตรสต็อกปัด round2) ไม่ใช่ทุนต่อหน่วย `numeric(14,4)`
+
 ### ข้อ 14 — Serial
 | case | ทำอะไร | api คาดหวัง | DB คาดหวัง |
 | --- | --- | --- | --- |
