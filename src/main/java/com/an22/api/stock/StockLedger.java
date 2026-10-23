@@ -39,12 +39,11 @@ public class StockLedger {
         Costing.costValue(after, avg), List.of(), note);
   }
 
-  /**
-   * ตัดออก non-serial ที่ทุนเฉลี่ยขณะนั้น (avg ไม่เปลี่ยน) — ไม่พอ → 400.
-   *
-   * @return ต้นทุน (COGS) = round2(avg × qty)
-   */
-  public double issue(long branchId, long productId, int qty, String type, String note) {
+  /** ผลของ {@link #issue}: ทุนเฉลี่ยที่ตัดออก + ต้นทุน (COGS) = round2(avg × qty). */
+  public record Issued(double avgCost, double cogs) {}
+
+  /** ตัดออก non-serial ที่ทุนเฉลี่ยขณะนั้น (avg ไม่เปลี่ยน) — ไม่พอ → 400. */
+  public Issued issue(long branchId, long productId, int qty, String type, String note) {
     StockDao.Balance b = stock.lock(branchId, productId);
     if (b.stock() < qty) {
       throw ApiException.badRequest(NOT_ENOUGH);
@@ -53,7 +52,7 @@ public class StockLedger {
     stock.set(branchId, productId, after, b.avgCost());
     stock.insertMovement(branchId, productId, type, -qty, Money.round2(b.avgCost()), Money.round2(-qty * b.avgCost()), after,
         b.avgCost(), Costing.costValue(after, b.avgCost()), List.of(), note);
-    return Money.round2(b.avgCost() * qty);
+    return new Issued(b.avgCost(), Money.round2(b.avgCost() * qty));
   }
 
   /**

@@ -168,4 +168,9 @@ public final class CompanyRules {
   private static BigDecimal or(BigDecimal value, BigDecimal fallback) {
     return value == null ? fallback : value;
   }
+
+  /** {@code branchDocPrefix()} (E21): เลขเอกสารต่อสาขาต่อวัน เช่น ("TR", "HQ", "2026-10-23") → {@code TR-HQ-20261023-}. */
+  public static String branchDocPrefix(String kind, String branchCode, String day) {
+    return kind + "-" + branchCode + "-" + day.replace("-", "") + "-";
+  }
 }

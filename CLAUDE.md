@@ -48,14 +48,14 @@ scripts/         db-apply.sh
 src/main/java/com/an22/api/
   config/        ApiProperties (env ทั้งหมด + check()), ClockConfig (Asia/Bangkok), DataSourceConfig (app / platform, appTx / platformTx, JdbcClient), FlywayConfig
   db/            TxActor (ผู้ทำของ request — ThreadLocal), TenantTransactionManager (ตั้ง app.* ทุก transaction), TxGuardDataSource, ActorDao,
-                 TenantLocks (pg_advisory_xact_lock ต่อบริษัท — กฎที่นับทั้งบริษัท)
+                 TenantLocks (pg_advisory_xact_lock ต่อบริษัท — กฎที่นับทั้งบริษัท), DocNumbers (เลขเอกสาร dt_doc_counters — ออกหลังตรวจกฎผ่าน)
   security/      PiiCipher (+ PiiConfig), JwtService, SecurityConfig (3 chain), ShopSessionFilter, PlatformSessionFilter
   web/           ApiException, ErrorResponse (ข้อความกลาง), ErrorHandler, FallbackErrorController (/error), RequestLogFilter,
                  ClientIp (X-Real-IP), BranchContext, TerminalContext, RequestContextResolvers
   model/         record ของ JSON = interface TS (User, Branch, Company, Session, LoginResponse, BillingInvoice …)
   rules/         กฎที่ port จาก core/models — pure Java ไม่ผูก Spring, 1 class ต่อ 1 ไฟล์ TS (UserRules, CompanyRules, StoreInfoRules, MenuAccessRules,
                  PlanRules, CostVisibility, SubscriptionRules, CategoryRules, Suppliers, PaymentMethodRules, PosTerminalRules, Money, ProductRules,
-                 Costing, SerialRules, PriceRules, PromotionRules)
+                 Costing, SerialRules, PriceRules, PromotionRules, TransferRules)
   health/        /healthz, /readyz
   auth/          login / verify / me (AuthController → AuthService / SessionService → SessionDao), LoginThrottle (+ Dao), ShopSession, PasswordResetTokens
   platform/      /platform/auth/login, /platform/me
@@ -64,6 +64,7 @@ src/main/java/com/an22/api/
   product/       /products (+ stock, movements, branch-stock, serials) — ProductService
   price/         /prices (ช่วงห้ามทับ — EXCLUDE + findOverlap ใต้ล็อก), PriceDao.current() = Product.currentPrice
   promotion/     /promotions (scope / สาขาเป็น bigint[], ส่วนลด / ของแถมเป็น jsonb ไม่มี FK), codesUsingProduct / codesUsingCategory (กันลบ)
+  transfer/      /transfers (+ receive, cancel) — เลข TR-<สาขา>-YYYYMMDD-NNNN, ล็อกแถวใบโอนก่อนรับ / ยกเลิก
   stock/         StockLedger (จุดเดียวที่แก้สต็อก), StockDao (branch_stock + stock_movements), SerialDao
   pos/           /pos-terminals (ขั้น 8: กะ / ล็อก / บิลพัก)
   company/       /settings/* (SettingsController → SettingsService → CompanyInfoDao / MenuAccessDao), /company/owner, PlanLimits

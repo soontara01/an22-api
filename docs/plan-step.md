@@ -1,6 +1,6 @@
 # แผนทำ an22-api (C2) — ทีละขั้นย่อย
 
-สถานะ: ขั้น 5b เสร็จ 2026-10-23 — รอผู้ใช้ก่อนเริ่มขั้น 6
+สถานะ: ขั้น 6 เสร็จ 2026-10-23 — รอผู้ใช้ก่อนเริ่มขั้น 7
 
 ## บริบท
 
@@ -394,9 +394,20 @@ api รันได้หลาย instance หลัง load balancer โดย
   - ลบ SKU / หมวดที่โปรที่ยังไม่หมดอายุอ้าง (รวมโปรที่ปิดใช้งาน และของแถม) → 400 พร้อมรหัสโปรตามลำดับ id
   - ยังไม่ทำ: ส่วนคิดราคาของโปร (`discountAmount`, `inScope`, `promotionsForProduct`) → ขั้น 7 / 9
 
-### ขั้น 6 — ใบโอนสินค้า
+### ขั้น 6 — ใบโอนสินค้า ✅ เสร็จ 2026-10-23
 - migration: `transfers`, `transfer_lines`; กฎ `TransferRules`; endpoint `/transfers` (+ `receive`, `cancel`), เลข `TR-…`; audit `transfer_cancel`
 - test: โอน non-serial / serial, รับขาด (E28), ยกเลิก (E29), สิทธิ์สาขาต้นทาง / ปลายทาง
+- ผลที่ทำ (รายละเอียดที่แผนไม่ได้ระบุ):
+  - `db/DocNumbers` (ตัวนับ `dt_doc_counters` ตามหัวข้อ "เลขเอกสาร") ทำในขั้นนี้ — `DocNumbersIT`: 16 thread ไม่ซ้ำไม่ข้าม, rollback ไม่ข้าม, แยกบริษัท
+  - V6: `dt_transfers` + `dt_transfer_lines` (PK `(tenant_id, transfer_id, position)`); an22_app ไม่มี DELETE (เอกสาร); บรรทัดเก็บ sku / name / unit ณ ตอนโอน,
+    `product_id` ไม่มี FK (ประวัติ — ใบที่ยังไม่รับกันลบ SKU ในแอปแทน, E18); `createdAt` = `created_at`, ผู้ทำเก็บเป็นชื่อ ณ ตอนนั้น (`*_by_name`)
+  - เลขออกหลังตรวจกฎผ่าน แต่ก่อนเดินสต็อก (หมายเหตุบัตรสต็อกมีเลขใบ); สต็อกเดินผ่าน `StockLedger` เรียงตาม productId; `StockLedger.issue` คืน `Issued(avgCost, cogs)`
+  - รับ / ยกเลิก: `SELECT … FOR UPDATE` แถวใบโอนก่อนตรวจสถานะ → พร้อมกัน 4 request สำเร็จ 1 (test)
+  - สร้าง / รับ / ยกเลิกต้องมี `X-Branch-Id` (400 "ไม่ได้เลือกสาขา…" — mock ใช้สาขาแรก); รายการ / อ่านไม่ส่ง = สาขาที่ทำงาน (header หรือสาขาแรก)
+  - ยกเลิก: ลำดับตรวจตาม mock (404 → มองเห็น 403 → admin 403 → กฎ 400) จึงตรวจ admin ใน service ไม่ใช่ controller
+  - qty / receivedQty เป็น Double ใน payload (กฎจำนวนเต็มทำงาน — แบบเดียวกับ `delta`)
+  - ลบ SKU / เปลี่ยนการคุม serial / ประเภท: ไม่มีของสาขาใดแต่อยู่ในใบที่ยังไม่รับ → "ยังมีสต็อกคงเหลือ (ระหว่างโอน TR-…) …" (`stockedBranches || inTransitNote` ของ mock)
+  - ยังไม่ทำ: เพดานแถวของ `GET /transfers` (`MAX_LIST_ROWS`) — รอตกลงเรื่องจำกัดขนาดคำตอบก่อนขั้น 8
 
 ### ขั้น 7 — กฎคำนวณ POS + fixtures (pure, ไม่มี DB)
 - port `PosPricing` (`priceCart`, `cartError`, `freeSets`, `manualDiscountError`, `belowCostIssues`), `PosPayment` (`paymentSummary`, `paymentError`, `cashDueFor`), ส่วนที่เหลือของ `PaymentMethodRules` (`roundCash`, …)

@@ -63,6 +63,36 @@ public class SerialDao {
         .update();
   }
 
+  /** ทุนของ serial ตามรายการ (ลำดับตาม id) — ใช้คิดทุนโอน / ทุนของที่ขาด. */
+  public List<Double> costsOf(List<String> serials) {
+    return jdbc.sql("SELECT cost FROM dt_serial_numbers WHERE serial = ANY (:serials) ORDER BY id")
+        .param("serials", serials.toArray(String[]::new))
+        .query((rs, i) -> rs.getBigDecimal("cost").doubleValue())
+        .list();
+  }
+
+  /**
+   * ออกจากคลังของสาขา (in_stock → in_transit / damaged …) — คืนจำนวนแถวที่เปลี่ยน (น้อยกว่าที่ขอ = ถูกขาย / ย้ายไปก่อน).
+   */
+  public int takeOut(List<String> serials, long productId, long branchId, String status, String note) {
+    return jdbc.sql(
+            "UPDATE dt_serial_numbers SET status = :status, removed_at = now(), note = :note"
+                + " WHERE serial = ANY (:serials) AND product_id = :product AND branch_id = :branch AND status = 'in_stock'")
+        .param("status", status).param("note", note).param("serials", serials.toArray(String[]::new))
+        .param("product", productId).param("branch", branchId)
+        .update();
+  }
+
+  /** ระหว่างโอน → เข้าคลังของสาขานี้ (ปลายทางรับ / ต้นทางเมื่อยกเลิก) — คืนจำนวนแถวที่เปลี่ยน. */
+  public int arrive(List<String> serials, long productId, long branchId, String note) {
+    return jdbc.sql(
+            "UPDATE dt_serial_numbers SET branch_id = :branch, status = 'in_stock', removed_at = NULL, received_at = now(), note = :note"
+                + " WHERE serial = ANY (:serials) AND product_id = :product AND status = 'in_transit'")
+        .param("note", note).param("serials", serials.toArray(String[]::new))
+        .param("product", productId).param("branch", branchId)
+        .update();
+  }
+
   /** ทุนของ serial ที่อยู่ในคลังของสาขานี้ (ใช้คิดสต็อก / ทุนเฉลี่ยของ SKU serial). */
   public List<Double> inStockCosts(long productId, long branchId) {
     return jdbc.sql("SELECT cost FROM dt_serial_numbers WHERE product_id = :product AND branch_id = :branch AND status = 'in_stock'"

@@ -19,6 +19,7 @@ import com.an22.api.model.StockCardResult;
 import com.an22.api.model.Supplier;
 import com.an22.api.price.PriceDao;
 import com.an22.api.promotion.PromotionDao;
+import com.an22.api.transfer.TransferDao;
 import com.an22.api.rules.CategoryRules;
 import com.an22.api.rules.Costing;
 import com.an22.api.rules.ProductRules;
@@ -65,9 +66,11 @@ public class ProductService {
   private final PriceDao prices;
   private final PromotionDao promotions;
   private final Clock clock;
+  private final TransferDao transfers;
 
   ProductService(ProductDao dao, CategoryDao categories, SupplierDao suppliers, BranchDao branches, StockDao stock, SerialDao serials,
-      StockLedger ledger, TenantLocks locks, Audit audit, PriceDao prices, PromotionDao promotions, Clock clock) {
+      StockLedger ledger, TenantLocks locks, Audit audit, PriceDao prices, PromotionDao promotions, Clock clock, TransferDao transfers) {
+    this.transfers = transfers;
     this.prices = prices;
     this.promotions = promotions;
     this.clock = clock;
@@ -357,10 +360,14 @@ public class ProductService {
         p.serialLength(), p.saleStatus());
   }
 
-  /** ' (สาขา HQ, BN)' เมื่อสาขาใดยังมีของ (E18) — ระหว่างโอน (ขั้น 6). */
+  /** ' (สาขา HQ, BN)' เมื่อสาขาใดยังมีของ ไม่งั้น ' (ระหว่างโอน TR-…)' เมื่อใบที่ยังไม่รับมี SKU นี้ (E18). */
   private String stockedNote(long id) {
     List<String> codes = dao.stockedBranchCodes(id);
-    return codes.isEmpty() ? "" : " (สาขา " + String.join(", ", codes) + ")";
+    if (!codes.isEmpty()) {
+      return " (สาขา " + String.join(", ", codes) + ")";
+    }
+    List<String> open = transfers.inTransitNos(id);
+    return open.isEmpty() ? "" : " (ระหว่างโอน " + String.join(", ", open) + ")";
   }
 
   private Set<Long> supplierIds() {
