@@ -166,6 +166,9 @@ src/test/java/com/an22/api/
 
 - api อยู่หลัง an22-web เท่านั้น: JWT stateless, **ไม่มี** cookie / session / CSRF / CORS / logout; IP ผู้ใช้ = `X-Real-IP`; ลิงก์อีเมลจาก base URL ที่ตั้งค่า (ไม่ใช่ `Host`); GET ห้ามแก้ข้อมูล
 - **ไม่มีความลับใน repo / log / ข้อความ error** (รหัส DB, JWT secret, กุญแจ PII) — env เท่านั้น, `.env` ถูก ignore
+- GitHub code scanning (CodeQL) `java/spring-disabled-csrf-protection` ที่ `SecurityConfig.stateless()` = **ตั้งใจปิด ห้ามเปิด**: api รับแค่ `Authorization: Bearer`
+  (browser ไม่แนบเอง, ไม่มี cookie / session) — CSRF กันที่ an22-web (`XSRF-TOKEN`); เปิดที่ api = request ของ web พังทั้งหมด (alert #2 รอ dismiss "Won't fix")
+- ค่าจาก query / body ห้ามตรวจด้วย regex ที่ซ้อน quantifier (ReDoS) และห้าม cast `double` → `long` ตรง ๆ — จำกัดความยาวก่อนแล้ว parse ด้วย `BigDecimal` (ดู `AuditRules.id`)
 - ข้อมูลส่วนบุคคล: `PiiCipher` AES-256-GCM `[version][nonce][ct+tag]` + AAD `<ตาราง>.<ช่อง>:<tenant_id>` (`PiiCipher.aad`), ค้นเลขผู้เสียภาษีด้วย `hashTaxId(tenant, เลข)`;
   หมุนกุญแจ = เพิ่ม version ใหม่ใน `PII_KEYS` (เขียนด้วยตัวสูงสุด อ่านได้ทุกตัว) — **สำรองกุญแจแยกจาก backup ของ DB** (หาย = ข้อมูลผู้ซื้อหายถาวร)
 - บัตรเครดิต: ห้ามเก็บเลขบัตรเต็ม (ขั้น 9)

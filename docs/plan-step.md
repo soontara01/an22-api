@@ -240,6 +240,18 @@ api รันได้หลาย instance หลัง load balancer โดย
 - ไม่มี pg_hba → network (private access / firewall); TLS บังคับ → URL `sslmode=verify-full&sslrootcert=<CA ของ Azure>`; extension ต้องเปิดใน `azure.extensions` ก่อน migrate (`btree_gist` ขั้น 5b)
 - รายการที่ต้องลองบน Azure จริง: `db/README.md` หัวข้อ "Production: Azure"
 
+### GitHub code scanning (CodeQL — 2026-10-23)
+| alert (an22-api) | ระดับ | สถานะ |
+| --- | --- | --- |
+| #4 `java/polynomial-redos` — `AuditRules` ตรวจ id ด้วย regex | high | แก้แล้ว PR #3: จำกัดความยาว ≤ 32 ตัว + `BigDecimal` (ไม่ใช้ regex) |
+| #3 `java/tainted-numeric-cast` — `AuditRules` cast double → long | critical | แก้แล้ว PR #3: `longValueExact()` |
+| #2 `java/spring-disabled-csrf-protection` — `SecurityConfig.stateless()` | high | **ไม่แก้ (ตั้งใจ)** — รอผู้ใช้สั่ง dismiss "Won't fix" |
+
+เหตุผลของ #2: CSRF ใช้ได้เมื่อ browser แนบตัวยืนยันตัวตนเอง (cookie) — api รับแค่ `Authorization: Bearer` ที่ an22-web ใส่ให้ (E48), ไม่มี cookie / session;
+CSRF กันที่ web ด้วย `XSRF-TOKEN` / `X-XSRF-TOKEN` (ขั้น 13 ทดสอบแล้ว: ไม่มี XSRF → 403); เปิด CSRF ที่ api ไม่เพิ่มความปลอดภัยและทำให้ request ของ web พังทั้งหมด
+— ถ้า CodeQL ยกขึ้นมาอีกหลังแก้ `SecurityConfig` ให้ตอบด้วยเหตุผลเดิม
+(ของหน้าบ้าน: FrontEnd-An22 alert #3 `js/clear-text-storage-of-sensitive-data` = mock เก็บรหัส platform ใน localStorage — มีเฉพาะ `useMock: true`)
+
 ### Request
 - JWT: claims `sub`, `tenantId`, `role`, `branchIds` / `allBranches`; ร้าน vs platform แยกด้วย `aud` (`shop` / `platform`) — ใช้สลับกัน → 401; อายุ `JWT_TTL_DAYS` (ค่าเริ่ม 7)
 - ทุก request ของร้าน: อ่านผู้ใช้ + บริษัทจาก DB (สิทธิ์สาขามีผลทันที) — บริษัทไม่ active / ผู้ใช้ปิด / ลบแล้ว → 401
