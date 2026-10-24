@@ -970,6 +970,21 @@ cash1 กะเปิดเครื่อง 1 HQ
 | 35.2 | `docker kill api2` (ไม่ graceful) ระหว่างขาย | request ที่ค้างอาจล้ม (502 จาก lb) แต่ข้อมูลไม่ครึ่ง ๆ | transaction ที่ค้าง rollback: ไม่มีบิลที่ขาด line, สต็อกตรงกับ movement |
 | 35.3 | start ใหม่ทั้งสองตัว | `/readyz` 200, flyway validate ผ่าน | — |
 
+**ผล** 2026-10-24 · commit `e09a4c1` (image หลังแก้ B5 / B6) · `scripts/e2e/35-failover.sh` · รัน 5 รอบ: ✅ 58 / ❌ 0 (2 รอบ), ✅ 57 / ❌ 1 (3 รอบ — 35.1 B7)
+- ✅ / ❌ 35.1 worker 6 ตัวยิงขายผ่าน lb ต่อเนื่อง (~700 บิล / 9 วิ) แล้ว `docker stop api1` (SIGTERM, exit 143, log `Commencing graceful shutdown` → `Graceful shutdown complete`):
+  request ที่ api1 รับไว้แล้วตอบจบ 200 ทุกตัว (access log ของ api1 ไม่มี 5xx), lb ส่งต่อ api2, token เดิมใช้ต่อได้, บิลที่ได้ 200 = บิลใน DB, ข้อมูลขาย / สต็อกครบ ✅;
+  **แต่ 3 ใน 5 รอบมี 502 × 1 จาก lb** ❌ (B7) — nginx: `recv() failed (104: Connection reset by peer) while reading response header from upstream` (api1)
+  - สาเหตุ: ช่วงที่ Tomcat หยุดรับงานแล้ว (graceful) lb ยังส่ง request ใหม่ (POST) ไป api1 → connection ถูก reset โดยไม่มีคำตอบ; request นั้นไม่ถูกบันทึก (ข้อมูลไม่เสีย, client ลองใหม่ได้)
+    แต่ client ได้ 502 — ไม่มีช่วง drain ระหว่าง "บอกว่าไม่พร้อม" กับ "หยุดรับงาน"
+  - เสนอแก้: drain ก่อนปิด — เมื่อได้ SIGTERM ให้ `/readyz` ตอบ 503 ทันทีแล้วยังรับงานต่อ N วิ (เช่น SmartLifecycle phase สูงกว่า web server graceful shutdown + sleep) ให้ lb / platform
+    เลิกส่งงานก่อน แล้วจึง graceful shutdown; ตั้ง grace period ของ platform ≥ N + 40 วิ; ใน stack ทดสอบ nginx ไม่ได้ probe `/readyz` (passive health เท่านั้น) จึงต้องทดสอบกับ probe ของ platform จริง
+    — หรือรับไว้เป็นข้อจำกัด (502 ของ request ที่ไม่ถูกบันทึก ลองใหม่ได้)
+- ✅ 35.2 start api1 คืน (`/readyz` 200) แล้ว `docker kill api2` (SIGKILL, exit 137) ระหว่างยิงขาย → 502 × 3 จาก lb (request ที่ค้างที่ api2 ตามที่คาด), ที่เหลือ 200 ไป api1;
+  บิลใหม่ใน DB = จำนวน 200 พอดี (request ที่ล้มไม่เหลือบิล), ไม่มีบิลไม่มีบรรทัด / ไม่มีการชำระ / ยอดชำระไม่เท่า, สต็อก = ผลรวม movement, เลขบิลไม่ข้าม / ซ้ำ, ไม่มี `idle in transaction`
+- ✅ 35.3 start api2 + restart api1 → `/readyz` 200 ทั้ง api1 / api2 / lb, log `flyway validate: ผ่าน (FLYWAY_MIGRATE=false)` ทั้งสองตัว, ขายที่ api1 / api2 ได้, ข้อมูลครบ
+- ✅ ตรวจร่วม: ไม่มี 5xx ใน access log ของ api, ไม่มี log ERROR, ไม่มีความลับใน log, ทุก error เป็น `{"message"}`
+- หมายเหตุ: รอบแรก ✘ 2 จาก script (สต็อกที่เติม 900 หมดเพราะยิงได้เร็วกว่าคาด) — เติม 5,000 แล้วรันใหม่
+
 ### ข้อ 36 — เพดานขนาดคำตอบ / timeout
 | case | ทำอะไร | api คาดหวัง | DB คาดหวัง |
 | --- | --- | --- | --- |
@@ -1141,6 +1156,7 @@ route ร้านที่มี `{id}` ทุกตัวถูกกวาด
 | B4 | 16.2 | โปร item_discount / bill_discount ส่ง `discount: null` → 200 ใช้ส่วนลดค่าเริ่ม 10% เงียบ ๆ (mock: 400 `กรุณากำหนดส่วนลด`); PUT แทนทั้งตัวที่ไม่ส่ง discount → ส่วนลดเดิมถูกแทนเป็น 10% | `PromotionRules.normalize` ตีความ null ว่า "ไม่ส่ง" แล้วใช้ `DEFAULT_DISCOUNT` | type ไม่ใช่ free_goods + discount null → 400 `กรุณากำหนดส่วนลด` (ไม่เติมค่าเริ่ม); หน้าบ้านส่งครบอยู่แล้ว ไม่กระทบ | รอแก้ |
 | B5 | 34.7 | login ผิดพร้อมกัน ≥ 10 request ต่อ instance → pool `platform` ติดตาย 30 วิ → 500 + งานอื่นของ pool นั้นค้าง (DoS) | `AuthService.login` (platformTx) ถือ connection แล้วเรียก `LoginThrottle` (`REQUIRES_NEW`) ที่ต้องใช้ connection ที่ 2 จาก pool เดียวกัน | เรียก throttle นอก transaction หลัก (หรือแยก pool) ทั้ง login / signup / forgot / verify / unlock + test ยิงพร้อมกันเกินขนาด pool | **แก้แล้ว** 2026-10-24: `AuthService.login` / `PlatformAuthService.login` / `AccountService.signup·forgotPassword` คุมลำดับนอก transaction → `ShopLoginTx` / `PlatformLoginTx` / `AccountTx`; billing catch-up ของ login ย้ายออกจาก transaction ของ login (ซ้อนเหมือนกัน); verify / unlock / ผู้อนุมัติ = appTx → platform (ข้าม pool) คงเดิม; `ThrottlePoolIT` (ตอนนี้ `ThrottleConcurrencyIT`; โค้ดเดิมแดงทั้ง 4); ข้อ 1 ผ่าน (unit 225 / integration 171), ข้อ 34 รันซ้ำไม่มี 500 + regression ข้อ 0 / 3 / 5 / 31 / 32 ผ่าน |
 | B6 | 34.7 | burst login ผิดพร้อมกันลองรหัสได้ 17–18 ครั้ง (เพดาน 5) | `check()` แล้วค่อย `fail()` (check-then-act) | นับแบบ atomic ก่อนตรวจรหัส (upsert คืนค่า) หรือ advisory lock ต่อ key | **แก้แล้ว** 2026-10-24: `LoginThrottle.attempt()` จองสิทธิ์ (upsert +1 แบบ atomic, ล็อกอยู่ = ไม่จอง → 429) ก่อนตรวจรหัส → ผิด `failed()` / ไม่ผิด `passed()` คืนสิทธิ์ (`finally`); signup / forgot `count()` atomic เหมือนกัน; trade-off: สิทธิ์ที่จองระหว่างตรวจรหัสนับรวม (บัญชีเดียวพร้อมกัน > 5 ได้ 429 ชั่วคราว); `ThrottleConcurrencyIT` (โค้ดเดิมแดง 3); ข้อ 1 ผ่าน (unit 225 / integration 175), ข้อ 34 ผ่าน + regression ข้อ 0 / 3 / 5 / 18 / 19 / 22 / 32 |
+| B7 | 35.1 | `docker stop` (SIGTERM, graceful) ระหว่างมีงานเข้า → บางครั้ง (3 / 5 รอบ) lb ได้ `Connection reset by peer` → 502 × 1 (request ไม่ถูกบันทึก ข้อมูลไม่เสีย) | ไม่มีช่วง drain: Tomcat หยุดรับงานขณะ lb ยังส่ง request ใหม่ | เมื่อ SIGTERM ให้ `/readyz` 503 แล้วรับงานต่อ N วิก่อน graceful shutdown + grace period ของ platform ≥ N + 40 วิ (ทดสอบกับ probe ของ platform จริง) — หรือรับเป็นข้อจำกัด | รอผู้ใช้ตัดสิน |
 
 ### ข้อสังเกต (ตรง spec / mock — รอผู้ใช้ตัดสินว่าจะแก้ spec ไหม)
 - O2 (25.5): ใบลดหนี้คืนเงินสดได้เกินเงินในลิ้นชักของกะ (เงินสดคาดติดลบได้) — mock ตรวจ "เงินสดในลิ้นชักไม่พอ" เฉพาะ cash movement ออก; ถ้าจะห้ามต้องแก้ spec + mock (FrontEnd-An22) ก่อน
