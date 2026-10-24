@@ -69,10 +69,10 @@ $(promo PRO-X19 weird)|ข้อมูลที่ส่งมาไม่ถู
 $(promo PRO-X20 item_discount '.discount.kind = "weird"')|ข้อมูลที่ส่งมาไม่ถูกต้อง
 EOF
 expect_sql "SELECT count(*) FROM dt_promotions WHERE tenant_id = $TENANT" "$count"
-# ข้อสังเกต: item_discount ส่ง discount: null → mock 400 "กรุณากำหนดส่วนลด"; api ใช้ส่วนลดค่าเริ่ม (PromotionRules.normalize — ตั้งใจ ตาม comment ในโค้ด)
+# B4: item_discount ส่ง discount: null → mock 400 "กรุณากำหนดส่วนลด"; api ใช้ส่วนลดค่าเริ่ม 10% (PromotionRules.normalize)
 call POST /promotions "$(promo PRO-NULL item_discount '.discount = null')"
-echo "     (สังเกต) discount null → $STATUS $(jq -c '{discount} // .' <<<"$BODY")"
-sql "DELETE FROM dt_promotions WHERE tenant_id = $TENANT AND code = 'PRO-NULL'; DELETE FROM dt_audit_log WHERE false" >/dev/null
+check "(B4) discount null → 400 กรุณากำหนดส่วนลด" "400 กรุณากำหนดส่วนลด" "$STATUS $(jq -r '.message // ("discount=" + (.discount | tostring))' <<<"$BODY")"
+sql "DELETE FROM dt_promotions WHERE tenant_id = $TENANT AND code = 'PRO-NULL'" >/dev/null
 
 case_id 16.3 "ขาย MS ×2 (PRO-MS10)"
 as "$T_CASH1"; branch "$BR_HQ"; terminal 1
