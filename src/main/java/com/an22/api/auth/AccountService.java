@@ -15,7 +15,6 @@ import com.an22.api.security.PiiCipher;
 import com.an22.api.web.ApiException;
 import java.time.Clock;
 import java.time.Instant;
-import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
@@ -91,9 +90,11 @@ public class AccountService {
     return new Message(SignupRules.FORGOT_PASSWORD_ANSWER);
   }
 
-  /** ล็อกอยู่ → 429; ไม่งั้นนับครั้งนี้ (transaction แยก — นับแม้ request ตอบ 400) — เรียกก่อน {@link AccountTx} ไม่ซ้อน transaction (B5). */
+  /**
+   * ล็อกอยู่ / ครบเพดาน → 429; ไม่งั้นนับครั้งนี้ (atomic — B6; transaction แยก นับแม้ request ตอบ 400) — เรียกก่อน {@link AccountTx} ไม่ซ้อน
+   * transaction (B5).
+   */
   private void limit(Map<ThrottleKey, Integer> maxByKey) {
-    throttle.check(List.copyOf(maxByKey.keySet()));
     throttle.count(maxByKey);
   }
 

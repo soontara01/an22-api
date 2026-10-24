@@ -35,21 +35,30 @@ public class PlatformAuthService {
   public record LoginRequest(String username, String password) {}
 
   /**
-   * {@code POST /platform/auth/login}: ผิด → 401 ข้อความเดียว. ไม่เปิด transaction เอง — throttle (REQUIRES_NEW) ไม่ซ้อนกับ
-   * {@link PlatformLoginTx#verify} (B5).
+   * {@code POST /platform/auth/login}: ผิด → 401 ข้อความเดียว. ไม่เปิด transaction เอง — จองสิทธิ์ลอง (B6) / {@link PlatformLoginTx#verify} /
+   * ผล เป็น transaction ต่อกัน ไม่ซ้อน (B5).
    */
   public PlatformLoginResponse login(LoginRequest req, String ip) {
     String username = UserRules.normalizeUsername(req.username());
-    ThrottleKey account = ThrottleKey.platform(username);
-    List<ThrottleKey> keys = List.of(account, ThrottleKey.ip(ip));
-    throttle.check(keys);
-    Optional<PlatformAdmin> admin = tx.verify(username, req.password());
-    if (admin.isEmpty()) {
-      throttle.fail(keys, null);
-      throw new ApiException(HttpStatus.UNAUTHORIZED, WRONG_LOGIN);
+    List<ThrottleKey> keys = List.of(ThrottleKey.platform(username), ThrottleKey.ip(ip));
+    throttle.attempt(keys);
+    boolean wrong = false;
+    boolean ok = false;
+    try {
+      Optional<PlatformAdmin> admin = tx.verify(username, req.password());
+      if (admin.isEmpty()) {
+        wrong = true;
+        throw new ApiException(HttpStatus.UNAUTHORIZED, WRONG_LOGIN);
+      }
+      PlatformLoginResponse response = new PlatformLoginResponse(jwt.issuePlatform(admin.get().id()), admin.get());
+      ok = true;
+      return response;
+    } finally {
+      // ผิด = สิทธิ์ที่จองนับเป็นความผิด; สำเร็จ = คืน + ล้างตัวนับของบัญชี; error = คืน
+      if (!wrong) {
+        throttle.passed(keys, ok);
+      }
     }
-    throttle.succeed(account);
-    return new PlatformLoginResponse(jwt.issuePlatform(admin.get().id()), admin.get());
   }
 
   /** admin ที่ token ระบุ (PlatformSessionFilter ทุก request) — ไม่มี = 401. */

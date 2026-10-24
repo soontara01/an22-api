@@ -45,26 +45,32 @@ public class AuthService {
   public record VerifyRequest(String username, String password) {}
 
   /**
-   * {@code POST /auth/login}: ไม่เปิด transaction เอง — throttle / billing catch-up / {@link ShopLoginTx#attempt} เป็น transaction สั้น ๆ ต่อกัน
-   * ไม่ซ้อน: 1 request ใช้ connection ของ pool platform ทีละ 1 (B5).
+   * {@code POST /auth/login}: ไม่เปิด transaction เอง — จองสิทธิ์ลอง ({@link LoginThrottle#attempt}, B6) / billing catch-up /
+   * {@link ShopLoginTx#attempt} / ผล เป็น transaction สั้น ๆ ต่อกัน ไม่ซ้อน: 1 request ใช้ connection ของ pool platform ทีละ 1 (B5).
    */
   public LoginResponse login(LoginRequest req, String ip) {
     String code = CompanyRules.normalizeCompanyCode(req.companyCode());
     String username = UserRules.normalizeUsername(req.username());
-    ThrottleKey account = ThrottleKey.shop(code, username);
-    List<ThrottleKey> keys = List.of(account, ThrottleKey.ip(ip));
-    throttle.check(keys);
-    // ออกใบแจ้งหนี้ / ระงับค้างชำระที่ถึงรอบก่อน job (แผนหัวข้อ "Stateless / scale") — commit ของตัวเองแม้ login ไม่ผ่าน
-    tx.companyId(code).ifPresent(billing::catchUp);
-    LoginResponse response;
+    List<ThrottleKey> keys = List.of(ThrottleKey.shop(code, username), ThrottleKey.ip(ip));
+    throttle.attempt(keys);
+    boolean wrong = false;
+    boolean ok = false;
     try {
-      response = tx.attempt(code, username, req.password());
+      // ออกใบแจ้งหนี้ / ระงับค้างชำระที่ถึงรอบก่อน job (แผนหัวข้อ "Stateless / scale") — commit ของตัวเองแม้ login ไม่ผ่าน
+      tx.companyId(code).ifPresent(billing::catchUp);
+      LoginResponse response = tx.attempt(code, username, req.password());
+      ok = true;
+      return response;
     } catch (ShopLoginTx.Rejected rejected) {
-      throttle.fail(keys, rejected.failedLogin);
+      wrong = true;
+      throttle.failed(rejected.failedLogin);
       throw new ApiException(HttpStatus.UNAUTHORIZED, WRONG_COMPANY_LOGIN);
+    } finally {
+      // รหัสถูก (สำเร็จ / บริษัทถูกระงับ) หรือ error = ไม่ใช่ความผิด → คืนสิทธิ์ที่จอง
+      if (!wrong) {
+        throttle.passed(keys, ok);
+      }
     }
-    throttle.succeed(account);
-    return response;
   }
 
   /**
@@ -84,11 +90,17 @@ public class AuthService {
   public Optional<User> credentials(ShopSession session, String usernameIn, String password, String ip) {
     String username = UserRules.normalizeUsername(usernameIn == null ? "" : usernameIn);
     List<ThrottleKey> keys = List.of(ThrottleKey.shop(session.companyCode(), username), ThrottleKey.ip(ip));
-    throttle.check(keys);
-    Optional<User> user = tx.check(Via.APP, session.tenantId(), username, password);
-    if (user.isEmpty()) {
-      throttle.fail(keys, null);
+    throttle.attempt(keys);
+    boolean wrong = false;
+    try {
+      Optional<User> user = tx.check(Via.APP, session.tenantId(), username, password);
+      wrong = user.isEmpty();
+      return user;
+    } finally {
+      // ผิด = สิทธิ์ที่จองนับเป็นความผิด; ถูก (ไม่ล้างตัวนับของบัญชี — เหมือนเดิม) / error = คืนสิทธิ์
+      if (!wrong) {
+        throttle.passed(keys, false);
+      }
     }
-    return user;
   }
 }
