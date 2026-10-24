@@ -60,8 +60,8 @@ src/main/java/com/an22/api/
                  Costing, SerialRules, PriceRules, PromotionRules, TransferRules, PosPricing, PosPayment — ผลตรง golden fixtures ผ่าน FixturesTest,
                  ListLimits, ShiftRules, SaleRules, TaxInvoiceRules, CreditNoteRules, ExchangeRules, AuditRules, SignupRules, CompanyDataRules, PlatformRules)
   health/        /healthz, /readyz
-  auth/          login / verify / me (AuthController → AuthService / SessionService → SessionDao), LoginThrottle (+ Dao), ShopSession, PasswordResetTokens,
-                 signup / forgot-password / reset-password (AccountService → AccountDao, platformTx)
+  auth/          login / verify / me (AuthController → AuthService → ShopLoginTx / SessionService → SessionDao), LoginThrottle (+ Dao), ShopSession, PasswordResetTokens,
+                 signup / forgot-password / reset-password (AccountService → AccountTx → AccountDao, platformTx)
   platform/      /platform/auth/login, /platform/me, /platform/companies/* + /platform/invoices/:id/pay (PlatformCompanyService → PlatformCompanyDao,
                  audit actor platform; purge ลบทุกตารางที่มี tenant_id ตาม FK — ไม่มี /platform/outbox)
   branch/        /branches
@@ -103,6 +103,9 @@ src/test/java/com/an22/api/
 
 - tx manager: `appTx` (ค่าเริ่ม, role `an22_app` ใต้ RLS) / `platformTx` (`@Transactional("platformTx")`, `an22_platform` BYPASSRLS); JdbcClient: `appJdbc` (ค่าเริ่ม) / `platformJdbc`
 - GET ใช้ `@Transactional(readOnly = true)` → PostgreSQL `READ ONLY` (enforceReadOnly เปิดแล้ว); ห้ามเรียก `@Transactional` method ใน class เดียวกัน; งานที่ต้องบันทึกแม้ request ล้ม = `REQUIRES_NEW`
+- **ห้ามเรียก `REQUIRES_NEW` บน tx manager เดียวกันจากใน transaction ที่เปิดอยู่** (1 request ใช้ 2 connection จาก pool เดียวกัน → พร้อมกันเท่าขนาด pool = pool ติดตาย 30 วิ — B5):
+  endpoint ที่นับ `LoginThrottle` / `BillingService.catchUp` (platformTx) ใช้ method ที่ไม่ `@Transactional` คุมลำดับ แล้วเรียก transaction สั้น ๆ ต่อกัน
+  (`AuthService.login` → `ShopLoginTx`, `PlatformAuthService.login` → `PlatformLoginTx`, `AccountService.signup/forgotPassword` → `AccountTx`); ข้าม pool (appTx → platform) ได้ — test `ThrottlePoolIT`
 - ขั้น 2: `TenantTransactionManager` ตั้ง `app.tenant_id` / `app.user_id` / `app.actor_kind` (SET LOCAL) ทุก transaction, TxGuard (query นอก transaction → error)
 
 ## Request ของร้าน / platform (ขั้น 2)
@@ -113,7 +116,7 @@ src/test/java/com/an22/api/
   — controller รับ `ShopSession`, `BranchContext`, `TerminalContext` (หรือ `PlatformAdmin`) เป็น parameter; งานเขียนสต็อก / ขาย / กะเรียก `branch.require()` (400)
 - endpoint ของร้านที่แก้ตาราง platform (แพ็กเกจ, คำขอลบ) = `@Transactional("platformTx")` + ระบุบริษัทจาก `ShopSession` เอง (BYPASSRLS)
 - tenant มาจาก token เท่านั้น — ห้ามรับ tenant จาก URL / query / body; สิทธิ์ / สาขาใช้ของ `ShopSession` (DB) ไม่ใช่ claims
-- งานที่ต้องบันทึกแม้ request ล้ม (นับ login ผิด, audit `login_failed`) = service แยก `REQUIRES_NEW` (`LoginThrottle`)
+- งานที่ต้องบันทึกแม้ request ล้ม (นับ login ผิด, audit `login_failed`) = service แยก `REQUIRES_NEW` (`LoginThrottle`) — เรียกนอก platformTx (ดูกติกา B5 ข้างบน)
 - signup ต่อ IP 10 / forgot-password ต่อ IP 10 + ต่อบริษัท+อีเมล 3 ครั้งใน 15 นาที (นับทุกครั้ง — `LoginThrottle.count`) → 429
 - จำกัด login ผิด: บัญชี 5 / IP 30 ครั้งใน 15 นาที → ล็อก 15 นาที, 429 — ใช้ `LoginThrottle.check()` / `fail()` / `succeed()` กับ endpoint ตรวจรหัสใหม่ (ปลดล็อก POS ขั้น 8)
 - รหัสผ่าน BCrypt (`PasswordEncoder` bean); ไม่มีผู้ใช้ก็ยังตรวจกับ hash หลอก (เวลาตอบไม่บอกว่ามีชื่อนี้)

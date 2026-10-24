@@ -77,7 +77,7 @@
   อีเมล `owner@<code>.e2e.test` / `boss@<code>.e2e.test`; รอบแรกมี ✘ 1 เพราะ bug ของ script (`login` ใน `$(…)`) — แก้ lib แล้วรันใหม่ผ่าน
 
 ### ข้อ 1 — `./mvnw verify` 1 รอบ
-- คาดหวัง: unit 225 / integration 167 ผ่านทั้งหมด, BUILD SUCCESS — บันทึกจำนวน + เวลา + commit (รันตอนไม่มี stack e2e เปิดอยู่)
+- คาดหวัง: unit 225 / integration 167 ผ่านทั้งหมด (หลังแก้ B5: integration 171), BUILD SUCCESS — บันทึกจำนวน + เวลา + commit (รันตอนไม่มี stack e2e เปิดอยู่)
 
 **ผล** 2026-10-23 · commit `e3202ef` · ✅ ผ่าน
 - ✅ unit (surefire) 225 ผ่าน, failures 0 / errors 0 / skipped 0
@@ -1127,7 +1127,7 @@ route ร้านที่มี `{id}` ทุกตัวถูกกวาด
 | B2 | 10.4, 12.2 | ค่าที่ DB มี CHECK แต่กฎไม่ตรวจ → 500 + log ERROR (คาด 400): ช่องทาง `cashRounding` / `closeCheck`, ผู้จำหน่าย `branchType`, SKU ว่าง / `saleStatus` / `vatType` / `cost` < 0 / `warrantyMonths` < 0 / `serialLength` 0 | กฎไม่ตรวจ → ชน CHECK ของ DB | ตรวจ enum ใน rules → 400 แบบ `knownRole`; ไล่คอลัมน์ enum อื่น (ข้อ 37.1) | รอแก้ |
 | B3 | 11.1, 12.2 | ตัวเลขทศนิยมใน field `Integer` ถูกตัดเงียบ ๆ: เลขเครื่อง 7.9 → สร้างเครื่อง 7, เดือนผ่อน 2.5 → 2, ตัวคูณหน่วยแพ็ก 2.5 → 2 (mock: ข้อความ "ต้องเป็นจำนวนเต็ม") | Jackson `ACCEPT_FLOAT_AS_INT` แปลงก่อนถึงกฎ | field ที่มีกฎจำนวนเต็มเป็น `Double` + ตรวจในกฎ (แบบ `Promotion`), ปิด `ACCEPT_FLOAT_AS_INT` ทั้งแอป | รอแก้ |
 | B4 | 16.2 | โปร item_discount / bill_discount ส่ง `discount: null` → 200 ใช้ส่วนลดค่าเริ่ม 10% เงียบ ๆ (mock: 400 `กรุณากำหนดส่วนลด`); PUT แทนทั้งตัวที่ไม่ส่ง discount → ส่วนลดเดิมถูกแทนเป็น 10% | `PromotionRules.normalize` ตีความ null ว่า "ไม่ส่ง" แล้วใช้ `DEFAULT_DISCOUNT` | type ไม่ใช่ free_goods + discount null → 400 `กรุณากำหนดส่วนลด` (ไม่เติมค่าเริ่ม); หน้าบ้านส่งครบอยู่แล้ว ไม่กระทบ | รอแก้ |
-| B5 | 34.7 | login ผิดพร้อมกัน ≥ 10 request ต่อ instance → pool `platform` ติดตาย 30 วิ → 500 + งานอื่นของ pool นั้นค้าง (DoS) | `AuthService.login` (platformTx) ถือ connection แล้วเรียก `LoginThrottle` (`REQUIRES_NEW`) ที่ต้องใช้ connection ที่ 2 จาก pool เดียวกัน | เรียก throttle นอก transaction หลัก (หรือแยก pool) ทั้ง login / signup / forgot / verify / unlock + test ยิงพร้อมกันเกินขนาด pool | รอแก้ (แนะนำแก้ก่อน) |
+| B5 | 34.7 | login ผิดพร้อมกัน ≥ 10 request ต่อ instance → pool `platform` ติดตาย 30 วิ → 500 + งานอื่นของ pool นั้นค้าง (DoS) | `AuthService.login` (platformTx) ถือ connection แล้วเรียก `LoginThrottle` (`REQUIRES_NEW`) ที่ต้องใช้ connection ที่ 2 จาก pool เดียวกัน | เรียก throttle นอก transaction หลัก (หรือแยก pool) ทั้ง login / signup / forgot / verify / unlock + test ยิงพร้อมกันเกินขนาด pool | **แก้แล้ว** 2026-10-24: `AuthService.login` / `PlatformAuthService.login` / `AccountService.signup·forgotPassword` คุมลำดับนอก transaction → `ShopLoginTx` / `PlatformLoginTx` / `AccountTx`; billing catch-up ของ login ย้ายออกจาก transaction ของ login (ซ้อนเหมือนกัน); verify / unlock / ผู้อนุมัติ = appTx → platform (ข้าม pool) คงเดิม; `ThrottlePoolIT` (โค้ดเดิมแดงทั้ง 4) — รอรันข้อ 34 ซ้ำ |
 | B6 | 34.7 | burst login ผิดพร้อมกันลองรหัสได้ 17–18 ครั้ง (เพดาน 5) | `check()` แล้วค่อย `fail()` (check-then-act) | นับแบบ atomic ก่อนตรวจรหัส (upsert คืนค่า) หรือ advisory lock ต่อ key | รอแก้ |
 
 ### ข้อสังเกต (ตรง spec / mock — รอผู้ใช้ตัดสินว่าจะแก้ spec ไหม)

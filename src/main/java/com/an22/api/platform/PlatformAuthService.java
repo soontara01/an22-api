@@ -10,9 +10,7 @@ import com.an22.api.security.JwtService;
 import com.an22.api.web.ApiException;
 import java.util.List;
 import java.util.Optional;
-import java.util.UUID;
 import org.springframework.http.HttpStatus;
-import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -24,37 +22,34 @@ public class PlatformAuthService {
 
   private final PlatformAdminDao dao;
   private final LoginThrottle throttle;
-  private final PasswordEncoder passwords;
+  private final PlatformLoginTx tx;
   private final JwtService jwt;
-  private final String dummyHash;
 
-  PlatformAuthService(PlatformAdminDao dao, LoginThrottle throttle, PasswordEncoder passwords, JwtService jwt) {
+  PlatformAuthService(PlatformAdminDao dao, LoginThrottle throttle, PlatformLoginTx tx, JwtService jwt) {
     this.dao = dao;
     this.throttle = throttle;
-    this.passwords = passwords;
+    this.tx = tx;
     this.jwt = jwt;
-    this.dummyHash = passwords.encode(UUID.randomUUID().toString());
   }
 
   public record LoginRequest(String username, String password) {}
 
-  /** {@code POST /platform/auth/login}: ผิด → 401 ข้อความเดียว. */
-  @Transactional(value = "platformTx", readOnly = true)
+  /**
+   * {@code POST /platform/auth/login}: ผิด → 401 ข้อความเดียว. ไม่เปิด transaction เอง — throttle (REQUIRES_NEW) ไม่ซ้อนกับ
+   * {@link PlatformLoginTx#verify} (B5).
+   */
   public PlatformLoginResponse login(LoginRequest req, String ip) {
     String username = UserRules.normalizeUsername(req.username());
     ThrottleKey account = ThrottleKey.platform(username);
     List<ThrottleKey> keys = List.of(account, ThrottleKey.ip(ip));
     throttle.check(keys);
-    Optional<AdminRow> row = username.isEmpty() ? Optional.empty() : dao.byUsername(username);
-    String raw = req.password() == null ? "" : req.password();
-    boolean match = passwords.matches(raw, row.map(AdminRow::passwordHash).orElse(dummyHash));
-    if (row.isEmpty() || !match) {
+    Optional<PlatformAdmin> admin = tx.verify(username, req.password());
+    if (admin.isEmpty()) {
       throttle.fail(keys, null);
       throw new ApiException(HttpStatus.UNAUTHORIZED, WRONG_LOGIN);
     }
     throttle.succeed(account);
-    PlatformAdmin admin = row.get().admin();
-    return new PlatformLoginResponse(jwt.issuePlatform(admin.id()), admin);
+    return new PlatformLoginResponse(jwt.issuePlatform(admin.get().id()), admin.get());
   }
 
   /** admin ที่ token ระบุ (PlatformSessionFilter ทุก request) — ไม่มี = 401. */
