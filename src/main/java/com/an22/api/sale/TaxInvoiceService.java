@@ -103,7 +103,7 @@ public class TaxInvoiceService {
     return rows.stream().map(r -> r.decode(b -> decrypt(s, b))).toList();
   }
 
-  /** {@code GET /tax-invoices/buyer?taxId=}: ผู้ซื้อล่าสุดที่ใช้เลขนี้ (ค้นด้วย hash ตรงทั้งเลข) — ไม่มี = null. */
+  /** {@code POST /tax-invoices/buyer-lookup { taxId }}: ผู้ซื้อล่าสุดที่ใช้เลขนี้ (ค้นด้วย hash ตรงทั้งเลข) — ไม่มี = null. */
   @Transactional(readOnly = true)
   public TaxInvoiceBuyer lastBuyer(ShopSession s, String taxId) {
     if (taxId == null || taxId.isBlank()) {

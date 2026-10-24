@@ -7,3 +7,4 @@ an22:
     base-url: https://shop.example.test
     # test เรียก job เอง (BillingService) — ไม่ให้ scheduler ตื่นกลาง test
     jobs: false
+    shutdown-drain: 0

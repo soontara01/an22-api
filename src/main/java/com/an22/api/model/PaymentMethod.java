@@ -1,6 +1,7 @@
 package com.an22.api.model;
 
 import java.util.List;
+import tools.jackson.databind.annotation.JsonDeserialize;
 
 /**
  * {@code PaymentMethod} / {@code PaymentMethodPayload} (payment-method.model.ts) — ตัวเลขเป็น Double ให้กฎตรวจแบบ JS ได้ตรง
@@ -21,6 +22,6 @@ public record PaymentMethod(
     String cashRounding,
     String promptPayId,
     String bankAccount,
-    List<Integer> installmentMonths,
+    @JsonDeserialize(contentUsing = IntegerOrInvalid.class) List<Integer> installmentMonths,
     String closeCheck,
     String note) {}

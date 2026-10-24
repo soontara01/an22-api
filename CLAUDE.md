@@ -30,12 +30,14 @@ scripts/db-apply.sh [--roles] [--seed]   # รัน script DB ด้วยม�
 docker build -t an22-api:$(git rev-parse --short HEAD) .   # image production
 docker compose --profile api up -d --build                  # ลอง image กับ dev DB (port 8080; ไม่มี seed ใน image)
 scripts/multi-instance-check.sh    # api 2 ตัวหลัง lb (compose.multi.yaml, project an22-multi แยกจาก dev): token ข้าม instance, ขายพร้อมกัน, job ครั้งเดียว — KEEP=1 เก็บ stack
+scripts/e2e/reset.sh && scripts/e2e/NN-*.sh   # E2E ทีละข้อตาม docs/e2e-test-plan.md (stack an22-multi, curl + ตรวจ DB, secrets ใน .e2e/ ไม่ commit)
 ```
 
 ## Container (production)
 
 `Dockerfile` 2 stage: build ด้วย `eclipse-temurin:25.0.4.1_1-jdk-noble` (`-DskipTests` — test อยู่ที่ `./mvnw verify`) → runtime `…-jre-noble`, layer ของ Boot (`jarmode=tools extract`)
-- user `an22` (uid 10001) ไม่ใช่ root; `java` เป็น PID 1 (exec form) → SIGTERM = graceful shutdown (รอ request ≤ 30 วิ — ตั้ง grace period ของ platform ≥ 40 วิ)
+- user `an22` (uid 10001) ไม่ใช่ root; `java` เป็น PID 1 (exec form) → SIGTERM = drain (`/readyz` 503 แต่ยังรับงาน `SHUTDOWN_DRAIN` วิ, ค่าเริ่ม 10 — `ShutdownDrain`, B7) แล้ว graceful shutdown
+  (รอ request ≤ 30 วิ) — ตั้ง grace period ของ platform ≥ drain + 40 วิ (= 50 วิ; compose `stop_grace_period: 50s`) และ readiness probe ที่ `/readyz` (ไม่มี probe = drain ไม่ช่วย)
 - image มีแค่ `db/migration` (ไม่มี `db/seed`, `.env`, test) — `.dockerignore` แบบ allowlist; ค่าทั้งหมดจาก env ตอนรัน
 - ไม่มี `HEALTHCHECK` (ไม่มี curl ใน image) — ตั้ง probe ที่ platform: liveness `GET /api/healthz`, readiness `GET /api/readyz`
 - `JAVA_TOOL_OPTIONS` = `-XX:MaxRAMPercentage=75 -XX:+ExitOnOutOfMemoryError` + timezone
@@ -58,9 +60,9 @@ src/main/java/com/an22/api/
                  PlanRules, CostVisibility, SubscriptionRules, CategoryRules, Suppliers, PaymentMethodRules, PosTerminalRules, Money, ProductRules,
                  Costing, SerialRules, PriceRules, PromotionRules, TransferRules, PosPricing, PosPayment — ผลตรง golden fixtures ผ่าน FixturesTest,
                  ListLimits, ShiftRules, SaleRules, TaxInvoiceRules, CreditNoteRules, ExchangeRules, AuditRules, SignupRules, CompanyDataRules, PlatformRules)
-  health/        /healthz, /readyz
-  auth/          login / verify / me (AuthController → AuthService / SessionService → SessionDao), LoginThrottle (+ Dao), ShopSession, PasswordResetTokens,
-                 signup / forgot-password / reset-password (AccountService → AccountDao, platformTx)
+  health/        /healthz, /readyz, ShutdownDrain (SmartLifecycle ก่อน graceful — B7) (HealthService ใช้ TransactionTemplate ใน try — `@Transactional` ขอ connection ก่อนเข้า method จับ error ไม่ได้ → 500, B1)
+  auth/          login / verify / me (AuthController → AuthService → ShopLoginTx / SessionService → SessionDao), LoginThrottle (+ Dao), ShopSession, PasswordResetTokens,
+                 signup / forgot-password / reset-password (AccountService → AccountTx → AccountDao, platformTx)
   platform/      /platform/auth/login, /platform/me, /platform/companies/* + /platform/invoices/:id/pay (PlatformCompanyService → PlatformCompanyDao,
                  audit actor platform; purge ลบทุกตารางที่มี tenant_id ตาม FK — ไม่มี /platform/outbox)
   branch/        /branches
@@ -102,6 +104,9 @@ src/test/java/com/an22/api/
 
 - tx manager: `appTx` (ค่าเริ่ม, role `an22_app` ใต้ RLS) / `platformTx` (`@Transactional("platformTx")`, `an22_platform` BYPASSRLS); JdbcClient: `appJdbc` (ค่าเริ่ม) / `platformJdbc`
 - GET ใช้ `@Transactional(readOnly = true)` → PostgreSQL `READ ONLY` (enforceReadOnly เปิดแล้ว); ห้ามเรียก `@Transactional` method ใน class เดียวกัน; งานที่ต้องบันทึกแม้ request ล้ม = `REQUIRES_NEW`
+- **ห้ามเรียก `REQUIRES_NEW` บน tx manager เดียวกันจากใน transaction ที่เปิดอยู่** (1 request ใช้ 2 connection จาก pool เดียวกัน → พร้อมกันเท่าขนาด pool = pool ติดตาย 30 วิ — B5):
+  endpoint ที่นับ `LoginThrottle` / `BillingService.catchUp` (platformTx) ใช้ method ที่ไม่ `@Transactional` คุมลำดับ แล้วเรียก transaction สั้น ๆ ต่อกัน
+  (`AuthService.login` → `ShopLoginTx`, `PlatformAuthService.login` → `PlatformLoginTx`, `AccountService.signup/forgotPassword` → `AccountTx`); ข้าม pool (appTx → platform) ได้ — test `ThrottleConcurrencyIT`
 - ขั้น 2: `TenantTransactionManager` ตั้ง `app.tenant_id` / `app.user_id` / `app.actor_kind` (SET LOCAL) ทุก transaction, TxGuard (query นอก transaction → error)
 
 ## Request ของร้าน / platform (ขั้น 2)
@@ -112,9 +117,11 @@ src/test/java/com/an22/api/
   — controller รับ `ShopSession`, `BranchContext`, `TerminalContext` (หรือ `PlatformAdmin`) เป็น parameter; งานเขียนสต็อก / ขาย / กะเรียก `branch.require()` (400)
 - endpoint ของร้านที่แก้ตาราง platform (แพ็กเกจ, คำขอลบ) = `@Transactional("platformTx")` + ระบุบริษัทจาก `ShopSession` เอง (BYPASSRLS)
 - tenant มาจาก token เท่านั้น — ห้ามรับ tenant จาก URL / query / body; สิทธิ์ / สาขาใช้ของ `ShopSession` (DB) ไม่ใช่ claims
-- งานที่ต้องบันทึกแม้ request ล้ม (นับ login ผิด, audit `login_failed`) = service แยก `REQUIRES_NEW` (`LoginThrottle`)
-- signup ต่อ IP 10 / forgot-password ต่อ IP 10 + ต่อบริษัท+อีเมล 3 ครั้งใน 15 นาที (นับทุกครั้ง — `LoginThrottle.count`) → 429
-- จำกัด login ผิด: บัญชี 5 / IP 30 ครั้งใน 15 นาที → ล็อก 15 นาที, 429 — ใช้ `LoginThrottle.check()` / `fail()` / `succeed()` กับ endpoint ตรวจรหัสใหม่ (ปลดล็อก POS ขั้น 8)
+- งานที่ต้องบันทึกแม้ request ล้ม (นับ login ผิด, audit `login_failed`) = service แยก `REQUIRES_NEW` (`LoginThrottle`) — เรียกนอก platformTx (ดูกติกา B5 ข้างบน)
+- signup ต่อ IP 10 / forgot-password ต่อ IP 10 + ต่อบริษัท+อีเมล 3 ครั้งใน 15 นาที (นับทุกครั้ง atomic — `LoginThrottle.count`) → 429
+- จำกัด login ผิด: บัญชี 5 / IP 30 ครั้งใน 15 นาที → ล็อก 15 นาที, 429 — endpoint ตรวจรหัสใหม่ใช้ `LoginThrottle.attempt()` (จองสิทธิ์ก่อนตรวจรหัส — atomic, B6)
+  → ผิด `failed()` (สิทธิ์ที่จองนับเป็นความผิด) / ไม่ผิด `passed()` (คืนสิทธิ์; login สำเร็จล้างตัวนับบัญชี) ใน `finally` — ห้าม check แล้วค่อยนับ;
+  สิทธิ์ที่จองระหว่างตรวจรหัสนับรวมด้วย (บัญชีเดียว login พร้อมกัน > 5 ได้ 429 ชั่วคราว) — test `ThrottleConcurrencyIT`
 - รหัสผ่าน BCrypt (`PasswordEncoder` bean); ไม่มีผู้ใช้ก็ยังตรวจกับ hash หลอก (เวลาตอบไม่บอกว่ามีชื่อนี้)
 
 ## Endpoint ของร้าน — รูปแบบ (ขั้น 3 เป็นต้นไป)
@@ -159,7 +166,7 @@ src/test/java/com/an22/api/
 
 `DB_URL` (PgBouncer) · `DB_MIGRATE_URL` (ตรง) · `DB_APP_USER/PASSWORD` · `DB_PLATFORM_USER/PASSWORD` · `DB_OWNER_USER/PASSWORD` (ไม่ต้องเมื่อ `FLYWAY_MIGRATE=false`) ·
 `DB_POOL_SIZE` (10) · `FLYWAY_MIGRATE` (`true` migrate / `false` validate ผ่าน PgBouncer) · `PII_KEYS` · `PII_HASH_KEY` · `JWT_SECRET` (`<kid>:<base64>,…`) · `JWT_TTL_DAYS` (7) ·
-`LOG_BODY` (`off` / `error` / `all`) · `LOG_BODY_MAX` (4096) · `APP_BASE_URL` (ต้นลิงก์ในอีเมล — ไม่ใช้ `Host`) · `JOBS_ENABLED` (`true`; test = `false`) · `JOBS_CRON` (stack ทดสอบเท่านั้น)
+`LOG_BODY` (`off` / `error` / `all`) · `LOG_BODY_MAX` (4096) · `APP_BASE_URL` (ต้นลิงก์ในอีเมล — ไม่ใช้ `Host`) · `JOBS_ENABLED` (`true`; test = `false`) · `JOBS_CRON` (stack ทดสอบเท่านั้น) · `SHUTDOWN_DRAIN` (10 วิ, 0–60; test = 0)
 — ค่าผิด / ไม่ตั้ง → ไม่ start ข้อความบอก**ชื่อตัวแปร ไม่บอกค่า** (`ApiProperties.check()`, `PiiCipher.fromEnv`) — ห้ามใช้ bean validation กับค่าลับ (error ของ binding พิมพ์ค่า)
 
 ## ความปลอดภัย (E48 / E49)
@@ -176,10 +183,14 @@ src/test/java/com/an22/api/
 ## JSON / error
 
 - context path `/api` (path ใน spec ไม่รวม `/api`), port 8080; JSON ไม่ละ `null` (`default-property-inclusion: always`), เวลา ISO-8601 (`Instant` → `…Z`)
+- ทศนิยมเข้า field `Integer` / `Long` → 400 ข้อความกลาง (`accept-float-as-int: false`, ไม่ตัดเงียบ — B3); field ที่ mock มีกฎ "จำนวนเต็ม" ของตัวเอง
+  ใช้ `Double` + ตรวจในกฎ หรือ `@JsonDeserialize(using = IntegerOrInvalid.class)` (ทศนิยม → ค่านอกช่วงของกฎ → ข้อความของ mock)
 - เวลาท้องถิ่น Asia/Bangkok ทั้ง container + JVM (`Application.main`, `Dockerfile`, test) → log +07:00, session DB `TimeZone = Asia/Bangkok`;
   **กฎ / วันธุรกิจยังต้องใช้ `Clock` ที่ inject เสมอ** (test แทนด้วย Clock ปลอม) — ห้าม `LocalDate.now()` / `Instant.now()` ตรง ๆ
 - error ทุกตัว `{ "message": "<ไทย>" }` ข้อความตามกฎ / mock ทุกตัวอักษร: `throw new ApiException(status, msg)` (หรือ `ApiException.badRequest/forbidden/notFound`)
 - ข้อความกลาง (`ErrorResponse`): 404 / 405 `ไม่มี endpoint <METHOD> <path>`, 400 `ข้อมูลที่ส่งมาไม่ถูกต้อง`, 500 `ระบบขัดข้อง กรุณาลองใหม่` (ไม่มีรายละเอียด), 401 `เซสชันหมดอายุ กรุณาเข้าสู่ระบบใหม่`
+- DB ปฏิเสธค่าที่กฎไม่ได้ตรวจ (CHECK 23514, ตัวเลขเกินคอลัมน์ 22003, NUL ใน text 22021) → `ErrorHandler` ตอบ 400 ข้อความกลาง + log WARN แค่ SQLSTATE (ไม่ log ข้อความ DB — มีค่าของแถว);
+  เป็นตาข่ายเท่านั้น — กฎที่ต้องมีข้อความเฉพาะยังต้องอยู่ใน `rules/` ตาม spec
 
 ## Log
 

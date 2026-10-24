@@ -260,4 +260,13 @@ class ProductIT extends ApiTest {
       pool.shutdown();
     }
   }
+
+  /** E2E B3: ตัวคูณหน่วยแพ็กทศนิยม → ข้อความของ mock (ไม่ตัดเป็น 2). */
+  @Test
+  void fractionalPackFactorIsRejected() throws Exception {
+    Map<String, Object> pack = sku("F1", false);
+    pack.put("packUnits", List.of(Map.of("unit", "แพ็ก", "factor", 2.5, "barcode", "")));
+    mvc.perform(as(owner, post("/products"), pack).header("X-Branch-Id", c.hq()))
+        .andExpect(status().isBadRequest()).andExpect(content().json(message("ตัวคูณของหน่วยต้องเป็นจำนวนเต็มมากกว่า 1"), true));
+  }
 }

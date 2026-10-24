@@ -92,7 +92,10 @@ class PriceAndPromotionRulesTest {
   private static final List<ProductRef> PRODUCTS = List.of(
       new ProductRef(1, "SKU-1", "active"), new ProductRef(2, "SKU-2", "discontinued"), new ProductRef(3, "SKU-3", "no_sale"));
 
-  /** {@code promo(extra)} ของ spec: ค่าเริ่ม + id 1, PRO-1, scope SKU 1, เริ่ม 2026-10-01 — ผ่าน JSON เหมือน request จริง. */
+  /**
+   * {@code promo(extra)} ของ spec: ค่าเริ่ม ({@code PROMOTION_DEFAULTS} — ส่วนลด 10%) + id 1, PRO-1, scope SKU 1, เริ่ม 2026-10-01 — ผ่าน JSON
+   * เหมือน request จริง (normalize ไม่เติม discount แล้ว — B4).
+   */
   private static Promotion promo(Map<String, Object> extra) {
     Map<String, Object> m = new HashMap<>();
     m.put("id", 1);
@@ -100,6 +103,7 @@ class PriceAndPromotionRulesTest {
     m.put("name", "โปร");
     m.put("startDate", "2026-10-01");
     m.put("scope", Map.of("all", false, "productIds", List.of(1), "categoryIds", List.of()));
+    m.put("discount", Map.of("kind", "percent", "value", 10));
     m.putAll(extra);
     Promotion p = PromotionRules.normalize(JSON.convertValue(m, Promotion.class));
     return withId(p, ((Number) m.get("id")).longValue());

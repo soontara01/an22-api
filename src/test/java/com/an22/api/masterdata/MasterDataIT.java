@@ -158,4 +158,17 @@ class MasterDataIT extends ApiTest {
   private long id(ResultActions result) throws Exception {
     return JSON.readTree(result.andReturn().getResponse().getContentAsString()).path("id").asLong();
   }
+
+  /** E2E B3: เดือนผ่อนทศนิยม → ข้อความของ mock; field จำนวนเต็มที่ไม่มีกฎของ mock (creditDays) ทศนิยม → 400 ข้อความกลาง (ไม่ตัดเงียบ ๆ). */
+  @Test
+  void fractionalIntegersAreRejected() throws Exception {
+    Map<String, Object> installment = method("INST", "installment");
+    installment.put("installmentMonths", List.of(2.5, 10));
+    mvc.perform(as(owner, post("/payment-methods"), installment))
+        .andExpect(status().isBadRequest()).andExpect(content().json(message("จำนวนเดือนผ่อนต้องเป็นจำนวนเต็ม 2 - 60"), true));
+    Map<String, Object> supplier = supplier("S9", "0105550123451");
+    supplier.put("creditDays", 2.5);
+    mvc.perform(as(owner, post("/suppliers"), supplier))
+        .andExpect(status().isBadRequest()).andExpect(content().json(message("ข้อมูลที่ส่งมาไม่ถูกต้อง"), true));
+  }
 }

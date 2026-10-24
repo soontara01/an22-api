@@ -21,6 +21,9 @@ spring:
   jackson:
     # api-contract.md: ห้ามละ field ที่เป็น null (B24)
     default-property-inclusion: always
+    deserialization:
+      # ทศนิยมเข้า Integer / Long → 400 (ไม่ตัดเงียบ ๆ — E2E B3); field ที่มีกฎจำนวนเต็มของ mock ใช้ IntegerOrInvalid / Double
+      accept-float-as-int: false
   mvc:
     problemdetails:
       enabled: false
@@ -54,6 +57,8 @@ an22:
   app:
     base-url: ${APP_BASE_URL:}
     jobs: ${JOBS_ENABLED:true}
+    # วินาทีที่ /readyz ตอบ 503 แต่ยังรับงาน ก่อน graceful shutdown (ShutdownDrain) — grace period ของ platform ≥ ค่านี้ + 40 วิ
+    shutdown-drain: ${SHUTDOWN_DRAIN:10}
     # เวลา job (cron 6 ช่องของ Spring, Asia/Bangkok) — เปลี่ยนเฉพาะ stack ทดสอบ (scripts/multi-instance-check.sh)
     jobs-cron: ${JOBS_CRON:0 5 0 * * *}
 

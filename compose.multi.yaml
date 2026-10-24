@@ -28,7 +28,7 @@ x-api: &api
   depends_on:
     pgbouncer:
       condition: service_started
-  stop_grace_period: 40s
+  stop_grace_period: 50s   # SHUTDOWN_DRAIN 10 + graceful ≤ 30 + เผื่อ
 
 services:
   db:

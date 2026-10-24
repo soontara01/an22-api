@@ -44,8 +44,9 @@ public record ApiProperties(Db db, Pii pii, Jwt jwt, Log log, App app) {
   /**
    * @param baseUrl {@code APP_BASE_URL} = URL ของหน้าเว็บ (an22-web) สำหรับลิงก์ในอีเมล — ไม่ใช้ header {@code Host} (E49)
    * @param jobs {@code JOBS_ENABLED} เปิด job ตามเวลา (ออกใบแจ้งหนี้ / ระงับค้างชำระ / ล้างของหมดอายุ) — ทุก instance เปิดได้ (ล็อกใน DB)
+   * @param shutdownDrain {@code SHUTDOWN_DRAIN} วินาทีที่ {@code /readyz} ตอบ 503 แต่ยังรับงานก่อน graceful shutdown (B7)
    */
-  public record App(String baseUrl, @DefaultValue("true") boolean jobs) {}
+  public record App(String baseUrl, @DefaultValue("true") boolean jobs, @DefaultValue("10") int shutdownDrain) {}
 
   /** ตรวจค่าบังคับ — ข้อความบอกชื่อตัวแปร ไม่บอกค่า. */
   public void check() {
@@ -69,6 +70,9 @@ public record ApiProperties(Db db, Pii pii, Jwt jwt, Log log, App app) {
     }
     if (db.poolSize() < 1) {
       problems.add("DB_POOL_SIZE ต้องเป็นจำนวนเต็ม ≥ 1");
+    }
+    if (app != null && (app.shutdownDrain() < 0 || app.shutdownDrain() > 60)) {
+      problems.add("SHUTDOWN_DRAIN ต้องเป็นจำนวนเต็ม 0–60");
     }
     if (log.bodyMax() < 256) {
       problems.add("LOG_BODY_MAX ต้อง ≥ 256");

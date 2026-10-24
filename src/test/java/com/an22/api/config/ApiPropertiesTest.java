@@ -17,7 +17,7 @@ class ApiPropertiesTest {
         new ApiProperties.Pii("k", "h"),
         new ApiProperties.Jwt("1:secret", 7),
         new ApiProperties.Log(ApiProperties.LogBody.ERROR, 4096),
-        new ApiProperties.App("https://shop.example.test", true));
+        new ApiProperties.App("https://shop.example.test", true, 10));
   }
 
   @Test
@@ -57,5 +57,12 @@ class ApiPropertiesTest {
   void hostPortDefaultsTo5432() {
     assertThat(ApiProperties.hostPort("jdbc:postgresql://x.postgres.database.azure.com/an22?sslmode=verify-full"))
         .isEqualTo("x.postgres.database.azure.com:5432");
+  }
+
+  @Test
+  void shutdownDrainIsBounded() {
+    ApiProperties p = props("jdbc:postgresql://db:6432/an22", "jdbc:postgresql://db:5432/an22", "o", true);
+    ApiProperties tooLong = new ApiProperties(p.db(), p.pii(), p.jwt(), p.log(), new ApiProperties.App("https://shop.example.test", true, 61));
+    assertThatThrownBy(tooLong::check).hasMessageContaining("SHUTDOWN_DRAIN ต้องเป็นจำนวนเต็ม 0–60");
   }
 }

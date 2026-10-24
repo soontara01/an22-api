@@ -113,4 +113,21 @@ class PosTerminalIT extends ApiTest {
         .param("t", c.id()).query(String.class).list());
     assertThat(terminals).containsExactly("4", "-");
   }
+
+  /** E2E B3: เลขเครื่องทศนิยมไม่ถูกตัดเป็นจำนวนเต็ม (ข้อความของ mock); 7.0 = 7. */
+  @Test
+  void fractionalTerminalNumberIsRejected() throws Exception {
+    Map<String, Object> body = terminal(1, c.hq(), "");
+    body.put("id", 7.9);
+    mvc.perform(as(owner, post("/pos-terminals"), body))
+        .andExpect(status().isBadRequest()).andExpect(content().json(message("เลขเครื่องต้องเป็นจำนวนเต็ม 1–999"), true));
+    body.put("id", 1e12);
+    mvc.perform(as(owner, post("/pos-terminals"), body))
+        .andExpect(status().isBadRequest()).andExpect(content().json(message("เลขเครื่องต้องเป็นจำนวนเต็ม 1–999"), true));
+    body.put("id", "7");
+    mvc.perform(as(owner, post("/pos-terminals"), body))
+        .andExpect(status().isBadRequest()).andExpect(content().json(message("ข้อมูลที่ส่งมาไม่ถูกต้อง"), true));
+    body.put("id", 7.0);
+    mvc.perform(as(owner, post("/pos-terminals"), body)).andExpect(status().isOk()).andExpect(jsonPath("$.id").value(7));
+  }
 }

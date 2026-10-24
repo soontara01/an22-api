@@ -1,25 +1,16 @@
 package com.an22.api.auth;
 
-import com.an22.api.audit.AuditDao;
-import com.an22.api.billing.BillingService;
-import com.an22.api.audit.AuditEntry;
-import com.an22.api.auth.SessionDao.CompanyRow;
-import com.an22.api.auth.SessionDao.UserRow;
 import com.an22.api.auth.SessionDao.Via;
-import com.an22.api.db.ActorDao;
-import com.an22.api.db.TxActor;
+import com.an22.api.billing.BillingService;
 import com.an22.api.model.LoginResponse;
 import com.an22.api.model.User;
 import com.an22.api.rules.CompanyRules;
 import com.an22.api.rules.UserRules;
-import com.an22.api.security.JwtService;
 import com.an22.api.web.ApiException;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.UUID;
 import org.springframework.http.HttpStatus;
-import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -39,79 +30,47 @@ public class AuthService {
           "overdue", "บริษัทนี้ถูกระงับการใช้งานเพราะค้างชำระค่าบริการ — เจ้าของบริษัทติดต่อผู้ให้บริการเพื่อชำระเงิน",
           "deletion", "บริษัทนี้อยู่ระหว่างรอลบข้อมูล — ติดต่อเจ้าของบริษัท");
 
-  private final SessionDao dao;
-  private final SessionService sessions;
   private final LoginThrottle throttle;
-  private final AuditDao audit;
-  private final ActorDao actors;
-  private final PasswordEncoder passwords;
-  private final JwtService jwt;
-  private final BillingService billingService;
-  /** hash ที่ไม่ตรงกับอะไรเลย — ตรวจเมื่อไม่มีผู้ใช้ เวลาตอบจะได้ไม่บอกว่าชื่อนี้มีอยู่. */
-  private final String dummyHash;
+  private final ShopLoginTx tx;
+  private final BillingService billing;
 
-  AuthService(
-      SessionDao dao,
-      SessionService sessions,
-      LoginThrottle throttle,
-      AuditDao audit,
-      ActorDao actors,
-      PasswordEncoder passwords,
-      JwtService jwt,
-      BillingService billingService) {
-    this.billingService = billingService;
-    this.dao = dao;
-    this.sessions = sessions;
+  AuthService(LoginThrottle throttle, ShopLoginTx tx, BillingService billing) {
     this.throttle = throttle;
-    this.audit = audit;
-    this.actors = actors;
-    this.passwords = passwords;
-    this.jwt = jwt;
-    this.dummyHash = passwords.encode(UUID.randomUUID().toString());
+    this.tx = tx;
+    this.billing = billing;
   }
 
   public record LoginRequest(String companyCode, String username, String password) {}
 
   public record VerifyRequest(String username, String password) {}
 
-  /** {@code POST /auth/login} (platformTx — ยังไม่รู้บริษัท). */
-  @Transactional("platformTx")
+  /**
+   * {@code POST /auth/login}: ไม่เปิด transaction เอง — จองสิทธิ์ลอง ({@link LoginThrottle#attempt}, B6) / billing catch-up /
+   * {@link ShopLoginTx#attempt} / ผล เป็น transaction สั้น ๆ ต่อกัน ไม่ซ้อน: 1 request ใช้ connection ของ pool platform ทีละ 1 (B5).
+   */
   public LoginResponse login(LoginRequest req, String ip) {
     String code = CompanyRules.normalizeCompanyCode(req.companyCode());
     String username = UserRules.normalizeUsername(req.username());
-    ThrottleKey account = ThrottleKey.shop(code, username);
-    List<ThrottleKey> keys = List.of(account, ThrottleKey.ip(ip));
-    throttle.check(keys);
-
-    Optional<CompanyRow> company = code.isEmpty() ? Optional.empty() : dao.companyByCode(Via.PLATFORM, code);
-    // ออกใบแจ้งหนี้ / ระงับค้างชำระที่ถึงรอบก่อน job (แผนหัวข้อ "Stateless / scale") แล้วอ่านสถานะใหม่
-    if (company.isPresent() && billingService.catchUp(company.get().id())) {
-      company = dao.companyByCode(Via.PLATFORM, code);
-    }
-    if (company.isEmpty()) {
-      passwords.matches(String.valueOf(req.password()), dummyHash);
-      throttle.fail(keys, null);
+    List<ThrottleKey> keys = List.of(ThrottleKey.shop(code, username), ThrottleKey.ip(ip));
+    throttle.attempt(keys);
+    boolean wrong = false;
+    boolean ok = false;
+    try {
+      // ออกใบแจ้งหนี้ / ระงับค้างชำระที่ถึงรอบก่อน job (แผนหัวข้อ "Stateless / scale") — commit ของตัวเองแม้ login ไม่ผ่าน
+      tx.companyId(code).ifPresent(billing::catchUp);
+      LoginResponse response = tx.attempt(code, username, req.password());
+      ok = true;
+      return response;
+    } catch (ShopLoginTx.Rejected rejected) {
+      wrong = true;
+      throttle.failed(rejected.failedLogin);
       throw new ApiException(HttpStatus.UNAUTHORIZED, WRONG_COMPANY_LOGIN);
+    } finally {
+      // รหัสถูก (สำเร็จ / บริษัทถูกระงับ) หรือ error = ไม่ใช่ความผิด → คืนสิทธิ์ที่จอง
+      if (!wrong) {
+        throttle.passed(keys, ok);
+      }
     }
-    CompanyRow c = company.get();
-    Optional<User> user = check(Via.PLATFORM, c.id(), username, req.password());
-    if (user.isEmpty()) {
-      // ชื่อที่พิมพ์ ไม่มี userId (อาจไม่มีผู้ใช้นี้ — ข้อความเดียวกัน E3)
-      throttle.fail(keys, AuditEntry.ofUser(c.id(), null, username, null, "login_failed", WRONG_LOGIN));
-      throw new ApiException(HttpStatus.UNAUTHORIZED, WRONG_COMPANY_LOGIN);
-    }
-    User u = user.get();
-    boolean ownerDeleting = "deletion".equals(c.suspendedReason()) && UserRules.isOwner(u.role());
-    if (!c.active() && !ownerDeleting) {
-      throw new ApiException(
-          HttpStatus.UNAUTHORIZED, SUSPENDED_MESSAGE.getOrDefault(c.suspendedReason(), SUSPENDED_MESSAGE.get("platform")));
-    }
-    throttle.succeed(account);
-    actors.becomeOnPlatform(TxActor.user(c.id(), u.id()));
-    audit.insertOnPlatform(AuditEntry.ofUser(c.id(), u.id(), u.name(), null, "login", ""));
-    ShopSession session = SessionService.of(c, u, dao.branches(Via.PLATFORM, c.id()), null);
-    String token = jwt.issueShop(c.id(), u.id(), u.role(), u.allBranches(), u.branchIds());
-    return new LoginResponse(token, SessionService.toSession(session, sessions.billing(session, Via.PLATFORM)));
   }
 
   /**
@@ -125,28 +84,23 @@ public class AuthService {
 
   /**
    * รหัสของผู้ใช้ในบริษัทของ session (ปลดล็อก POS, ผู้อนุมัติส่วนต่าง — E48) — นับผิดใน {@link LoginThrottle} แบบเดียวกับ login
-   * (ล็อกอยู่ → 429); ผิด = empty (ผู้เรียกเลือกข้อความ 400 เอง). ทำงานใน transaction ของผู้เรียก.
+   * (ล็อกอยู่ → 429); ผิด = empty (ผู้เรียกเลือกข้อความ 400 เอง). ทำงานใน transaction ของผู้เรียก (appTx) — throttle ใช้ pool platform
+   * (คนละ pool จึงไม่ติดตายแบบ B5; ห้ามเรียกจาก platformTx).
    */
   public Optional<User> credentials(ShopSession session, String usernameIn, String password, String ip) {
     String username = UserRules.normalizeUsername(usernameIn == null ? "" : usernameIn);
     List<ThrottleKey> keys = List.of(ThrottleKey.shop(session.companyCode(), username), ThrottleKey.ip(ip));
-    throttle.check(keys);
-    Optional<User> user = check(Via.APP, session.tenantId(), username, password);
-    if (user.isEmpty()) {
-      throttle.fail(keys, null);
+    throttle.attempt(keys);
+    boolean wrong = false;
+    try {
+      Optional<User> user = tx.check(Via.APP, session.tenantId(), username, password);
+      wrong = user.isEmpty();
+      return user;
+    } finally {
+      // ผิด = สิทธิ์ที่จองนับเป็นความผิด; ถูก (ไม่ล้างตัวนับของบัญชี — เหมือนเดิม) / error = คืนสิทธิ์
+      if (!wrong) {
+        throttle.passed(keys, false);
+      }
     }
-    return user;
-  }
-
-  /** ผู้ใช้ที่ใช้งานอยู่และรหัสตรง ({@code checkCredentials()} ของ mock) — ผู้ใช้ปิดใช้งาน = รหัสผิด (E3). */
-  private Optional<User> check(Via via, long tenantId, String username, String password) {
-    Optional<UserRow> row = username.isEmpty() ? Optional.empty() : dao.userByUsername(via, tenantId, username);
-    String raw = password == null ? "" : password;
-    if (row.isEmpty()) {
-      passwords.matches(raw, dummyHash);
-      return Optional.empty();
-    }
-    boolean match = passwords.matches(raw, row.get().passwordHash());
-    return match && row.get().user().active() ? Optional.of(row.get().user()) : Optional.empty();
   }
 }

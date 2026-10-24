@@ -2,6 +2,7 @@ package com.an22.api.web;
 
 import jakarta.servlet.http.HttpServletRequest;
 import java.sql.SQLException;
+import java.util.Set;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
@@ -61,12 +62,23 @@ public class ErrorHandler {
   /** PostgreSQL ยกเลิก query ที่เกิน {@code statement_timeout} ของ role (SQLSTATE 57014) — transaction rollback แล้ว → 503. */
   static final String QUERY_CANCELED = "57014";
 
+  /**
+   * DB ปฏิเสธค่าที่กฎไม่ได้ตรวจ (E2E B2 / B8 / B9) — transaction rollback แล้ว → 400 ข้อความกลาง: CHECK (23514), ตัวเลขเกินคอลัมน์ {@code numeric(14,x)}
+   * (22003), ข้อความมี NUL ({@code \u0000}) ที่ {@code text} เก็บไม่ได้ (22021). ข้อความเฉพาะต้องเป็นกฎใน spec + mock ก่อน.
+   */
+  static final Set<String> REJECTED_DATA = Set.of("23514", "22003", "22021");
+
   @ExceptionHandler(Exception.class)
   ResponseEntity<ErrorResponse> unexpected(Exception e, HttpServletRequest request) {
     for (Throwable t = e; t != null; t = t.getCause()) {
       if (t instanceof SQLException sql && QUERY_CANCELED.equals(sql.getSQLState())) {
         log.warn("db timeout {} {}", request.getMethod(), apiPath(request));
         return respond(HttpStatus.SERVICE_UNAVAILABLE, ErrorResponse.DB_TIMEOUT);
+      }
+      if (t instanceof SQLException sql && REJECTED_DATA.contains(sql.getSQLState())) {
+        // ไม่ log ข้อความของ DB — DETAIL มีค่าของแถว (อาจเป็นข้อมูลส่วนบุคคล)
+        log.warn("db rejected data {} {} sqlstate {}", request.getMethod(), apiPath(request), sql.getSQLState());
+        return badRequest();
       }
     }
     log.error("unhandled {} {}", request.getMethod(), apiPath(request), e);

@@ -205,4 +205,27 @@ class PromotionIT extends ApiTest {
     // รหัสซ้ำตรวจในบริษัทเดียวกันเท่านั้น
     create(owner, promo("PRO-1111", 10)).andExpect(status().isOk());
   }
+
+  /** E2E B4: โปรส่วนลดที่ไม่มี discount (null / ไม่ส่ง / PUT แทนทั้งตัวที่ไม่ส่ง) → 400 ไม่เติม 10% เงียบ ๆ. */
+  @Test
+  void discountPromotionWithoutDiscountIsRejected() throws Exception {
+    Map<String, Object> nullDiscount = promo("PRO-N", 0);
+    nullDiscount.put("discount", null);
+    create(owner, nullDiscount).andExpect(status().isBadRequest()).andExpect(content().json(message("กรุณากำหนดส่วนลด"), true));
+    Map<String, Object> bill = promo("PRO-B", 0);
+    bill.put("type", "bill_discount");
+    bill.remove("discount");
+    create(owner, bill).andExpect(status().isBadRequest()).andExpect(content().json(message("กรุณากำหนดส่วนลด"), true));
+
+    // ยังไม่เริ่ม (โปรที่เริ่มแล้วแก้ส่วนลดไม่ได้อยู่แล้ว)
+    Map<String, Object> ok = promo("PRO-OK", 5);
+    ok.put("discount", Map.of("kind", "amount", "value", 30));
+    long id = id(create(owner, ok).andExpect(status().isOk()));
+    Map<String, Object> noDiscount = promo("PRO-OK", 5);
+    noDiscount.remove("discount");
+    mvc.perform(as(owner, put("/promotions/" + id), noDiscount))
+        .andExpect(status().isBadRequest()).andExpect(content().json(message("กรุณากำหนดส่วนลด"), true));
+    mvc.perform(as(owner, get("/promotions/" + id)))
+        .andExpect(jsonPath("$.discount.kind").value("amount")).andExpect(jsonPath("$.discount.value").value(30.0));
+  }
 }
