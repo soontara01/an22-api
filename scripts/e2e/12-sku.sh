@@ -74,7 +74,7 @@ b2=0
 for edit in '.sku = " "' '.saleStatus = "weird"' '.vatType = "weird"' '.cost = -1' '.warrantyMonths = -1' '.serialControl = true | .serialLength = 0'; do
   call POST /products "$(sku TST-004 "ค่าที่ DB ห้าม" "$CAT_CBL" "$edit")"
   [[ "$STATUS" =~ ^5 ]] && b2=$((b2 + 1))
-  check "(B2) $edit → 4xx ไม่ใช่ 5xx" 4 "${STATUS:0:1} ($STATUS $(jq -r .message <<<"$BODY"))"
+  check "(B2) $edit → 400 ข้อความกลาง (DB ปฏิเสธ — ErrorHandler)" "400 ข้อมูลที่ส่งมาไม่ถูกต้อง" "$STATUS $(jq -r .message <<<"$BODY")"
 done
 E2E_ALLOW_5XX=$b2
 E2E_ALLOW_ERROR_LOG=$((b2 * 2))

@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # ข้อ 10 — หมวดหมู่ / ผู้จำหน่าย / ช่องทางชำระเงิน (docs/e2e-test-plan.md)
 E2E_STEP=10
-# B2 (docs/e2e-test-plan.md หัวข้อ 7): enum นอกค่าที่รู้จัก 3 case → 500 + log ERROR 2 บรรทัดต่อ case — ยอมให้ตรวจร่วมวัดปัญหาอื่น
-E2E_ALLOW_5XX=3
-E2E_ALLOW_ERROR_LOG=6
+# B2 แก้แล้ว (ErrorHandler → 400) — ไม่ยอมให้มี 5xx
+E2E_ALLOW_5XX=0
+E2E_ALLOW_ERROR_LOG=0
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 tomorrow=$(TZ=Asia/Bangkok date -d tomorrow +%F)

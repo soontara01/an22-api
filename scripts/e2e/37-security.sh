@@ -225,7 +225,7 @@ done
 check "ไม่มีเลขผู้เสียภาษี 0105550123451 ใน log ทุก container" 0 "$(grep -cF 0105550123451 "$ALL" || true)"
 check "body ที่ log แล้ว mask ช่องอ่อนไหว (มี \"***\")" yes "$(grep -q '"\*\*\*"' "$ALL" && echo yes || echo no)"
 
-# 37.3: 500 × 2 (api1 + api2) + bug ที่รู้แล้วใน 37.1 (B8 unitCost 1e20, B9 NUL) × 2 — access ERROR + unhandled ERROR ต่อ request
-E2E_ALLOW_5XX=4
-E2E_ALLOW_ERROR_LOG=8
+# 37.3: 500 × 2 (api1 + api2) — access ERROR + unhandled ERROR ต่อ request (B8 / B9 แก้แล้ว → 400)
+E2E_ALLOW_5XX=2
+E2E_ALLOW_ERROR_LOG=4
 finish
