@@ -839,6 +839,18 @@ cash1 กะเปิดเครื่อง 1 HQ
 | 30.4 | DELETE (ยกเลิก) | 200 ทุกคนใช้งานได้ | deletion_* null, active true, audit `deletion_cancel` |
 | 30.5 | ยกเลิกขณะมีใบค้างเกินผ่อนผัน (ตั้ง DB) | 200 แต่ถูกระงับ overdue ทันที (billing ตัดสินใหม่) | suspended_reason overdue |
 
+**ผล** 2026-10-24 · commit `c48fe2d` (image เดียวกับข้อ 0) · `scripts/e2e/30-deletion.sh` · ✅ 81 / ❌ 0
+- ✅ 30.1 boss GET / POST → 403 `ขอลบข้อมูลบริษัทได้เฉพาะเจ้าของบริษัท`; owner GET (ไม่มีคำขอ) → 200 body ว่าง; DELETE → `ไม่มีคำขอลบข้อมูล`
+- ✅ 30.2 รหัสบริษัทผิด → `พิมพ์รหัสบริษัทให้ตรงเพื่อยืนยัน`, รหัสผ่านว่าง → `กรุณากรอกรหัสผ่านเพื่อยืนยัน`, ผิด → `รหัสผ่านไม่ถูกต้อง` (ไม่มีคำขอ);
+  ถูก (รหัสบริษัทตัวเล็ก + ช่องว่าง, @api2) → 200 purgeAfter = วันนี้+30, requestedBy คุณเจ้าของ, reason ตัดช่องว่าง; DB active false, suspended_reason deletion, deletion_* ครบ;
+  audit `deletion_request` "ลบได้ตั้งแต่ YYYY-MM-DD — ย้ายไประบบอื่น"; ซ้ำ → `ขอลบข้อมูลไว้แล้ว`; GET → คำขอ
+- ✅ 30.3 boss login → 401 `บริษัทนี้อยู่ระหว่างรอลบข้อมูล — ติดต่อเจ้าของบริษัท`, token เดิมของ boss → 401; owner `/me` 200 (deletionPurgeAfter),
+  `/products` / `/users` / `/categories` / `/sales` / POST → 403 `บริษัทอยู่ระหว่างรอลบข้อมูล — ดาวน์โหลดข้อมูลหรือยกเลิกคำขอลบได้ที่เมนูบัญชีบริษัท`,
+  `/company/export` (@api2) / `/audit-log` / `/company/subscription` → 200; owner login ได้
+- ✅ 30.4 DELETE → 200; deletion_* null, active true, audit `deletion_cancel`; boss login + ใช้งานได้ (@api2), owner ใช้งานได้
+- ✅ 30.5 บริษัทที่ 2 ขอลบ แล้วตั้ง (SQL) ใบแจ้งหนี้ค้างเกินผ่อนผัน → ยกเลิกคำขอ 200 แต่ถูกระงับ overdue ทันที (billing ตัดสินใหม่); login owner → 401 ข้อความค้างชำระ
+- ✅ ตรวจร่วม: ไม่มี 5xx / ERROR, ไม่มีความลับใน log, ทุก error เป็น `{"message"}`
+
 ### ข้อ 31 — การเก็บเงิน (billing) + job บน 2 instance (`JOBS_CRON` ทุก 10 วิ เฉพาะข้อนี้)
 | case | ทำอะไร | api คาดหวัง | DB คาดหวัง |
 | --- | --- | --- | --- |
