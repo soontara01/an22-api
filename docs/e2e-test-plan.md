@@ -1012,6 +1012,31 @@ cash1 กะเปิดเครื่อง 1 HQ
 | 37.4 | ค้นใน log ทั้งหมดของการทดสอบ | ไม่มีรหัสผ่าน, token JWT, กุญแจ, เลขบัตรเต็ม, ชื่อ / เลขผู้ซื้อที่ถอดรหัส | — |
 | 37.5 | header ของคำตอบ (ปกติ / 401 / preflight `OPTIONS` จาก origin อื่น) | ไม่มี `Set-Cookie`, ไม่มี `Access-Control-Allow-*`, 401 ไม่บอกเหตุผลว่า token ผิดเพราะอะไร | — |
 
+**ผล** 2026-10-24 · commit `abbc849` (image `e09a4c1`) · `scripts/e2e/37-security.sh` · ✅ 132 / ❌ 2 (37.1 — B8, B9)
+- เตรียมข้อมูลบริษัทใหม่ให้ทุก GET มีของจริง: ผู้จำหน่าย, โปร, ใบโอน, กะ, บิลเงินสด + บัตร (อ้างอิง 4 หลัก) พร้อมใบกำกับเต็มรูป (ผู้ซื้อ / ที่อยู่ลับ), ใบลดหนี้ (เลื่อนบิลเป็นเมื่อวาน), บิลพัก;
+  เลขบัตรเต็ม `4111111111111111` ในช่องอ้างอิง → 400 และไม่มีในตาราง
+- 37.1 ค่าแปลก 39 แบบ (ทุกตัวผ่าน lb):
+  - ✅ path injection / emoji / เลขยาว / ติดลบ / ทศนิยม / 0 → 404; query injection `from` / emoji `branchId` / `from` ซ้ำ → 400;
+    `userId` ยาวมาก, `productId=1e308` → 200 ไม่กรอง (= `Number(x) \|\| null` ของ mock), `taxId` injection → 200 `null` (ค้นไม่เจอ)
+  - ✅ body ไม่ใช่ JSON / array / string / `null` / ซ้อน 5,000 ชั้น / `text/plain` → 400; `delta` null / string / ±1e30 / 1e400 / 2.5, `unitCost` ติดลบ → 400;
+    code injection → 400, ผู้จำหน่ายชื่อมี NUL → 400 (ตกกฎอื่นก่อน), `qty` 20 หลัก / ไม่มี items / null แทน array → 400
+  - ✅ `X-Branch-Id: 😀` → 400, `X-Terminal-Id: -1` → 200 (ถือว่าไม่มีเครื่อง = mock), login injection / ชื่อ 100,000 ตัว / `Authorization` injection → 401, body 2 MB → 413 จาก nginx (lb)
+  - ❌ **B8** `PUT /products/:id/stock` `unitCost: 1e20` → 500 (`numeric field overflow` ตอน UPDATE `dt_branch_stock.avg_cost`) — rollback ข้อมูลไม่เสีย
+  - ❌ **B9** `POST /categories` ชื่อมี `\u0000` → 500 (`invalid byte sequence for encoding "UTF8": 0x00`) — rollback ข้อมูลไม่เสีย
+  - ✅ DB: ตารางที่เปลี่ยนมีแค่ `dt_login_throttle` (login ผิด), ไม่มีหมวด / ผู้จำหน่าย / movement แปลก, สต็อก = ผลรวม movement
+- ✅ 37.2 GET 53 endpoint (ร้าน 48 + เจ้าของ `/company/deletion` `/company/export` + platform 3) → 200 ทุกตัว; snapshot md5 ทุกตารางก่อน / หลัง → เปลี่ยนแค่ `dt_audit_log`
+  = `company_export` 1 แถว (billing catch-up ของ `/me` ไม่มีงาน)
+- ✅ 37.3 หยุด pgbouncer → `GET /categories` ที่ api1 / api2 = 500 `{"message":"ระบบขัดข้อง กรุณาลองใหม่"}` ไม่มี exception / ชื่อ class / SQL / ชื่อ DB ใน body หรือ header
+- ✅ 37.4 log ทุก container (api1 / api2 / lb / pgbouncer / db) ตั้งแต่ stack เริ่ม (หลัง reset ล่าสุด — ข้อ 0 / 3 / 5 / 18 / 19 / 22 / 32 / 34–37, ~17,900 บรรทัด):
+  ไม่มีรหัส DB / กุญแจ PII / JWT secret / token 159 ตัวที่ออกในการทดสอบ / รูปแบบ JWT / รหัสผ่านทดสอบ / เลขบัตรเต็ม / ชื่อ / ที่อยู่ผู้ซื้อ; body ที่ log mask เป็น `"***"`;
+  เลขผู้เสียภาษีไม่อยู่ใน log ของ api (query `taxId=***`) แต่ **อยู่ใน access log ของ nginx** (lb ของ stack ทดสอบ log URL เต็ม) → ข้อสังเกต O3
+  (log ของข้อก่อน reset ถูกตรวจแล้วโดย `finish` ของแต่ละข้อ)
+- ✅ 37.5 200 / login 200 / 401 ไม่มี `Set-Cookie`, `Access-Control-Allow-*`, `X-Powered-By`; 401 ของ token ว่าง / ขยะ / หมดอายุ / ลายเซ็นผิด / aud ผิด / token platform
+  = body เดียวกัน `เซสชันหมดอายุ กรุณาเข้าสู่ระบบใหม่` ไม่มี `WWW-Authenticate`; preflight `OPTIONS` + GET จาก `Origin` อื่น (lb / api1) ไม่มี header CORS
+- ✅ ตรวจร่วม: 5xx 4 / ERROR 8 = 37.3 × 2 + B8 / B9 × 2 (access + unhandled ต่อ request), ทุก error เป็น `{"message"}`
+- หมายเหตุ (script): snapshot `UNION ALL` คืนลำดับไม่คงที่ (ต้อง sort), probe ที่มีแต่ header ต้องส่ง body `-`,
+  แก้ลายเซ็นตัวสุดท้ายของ base64url อาจเปลี่ยนแค่ padding bit (ลายเซ็นเดิม — ต้องแก้ตัวกลาง), ใบลดหนี้ต้องเป็นบิลก่อนวันนี้
+
 ### ข้อ 38 — ตรวจความสอดคล้องทั้ง DB + สรุปผล
 query ทั้ง DB หลังรันทุกข้อ (ทุกบริษัท):
 - `dt_branch_stock.stock` = ผลรวม `dt_stock_movements.qty` และ = `balance_qty` ของ movement ล่าสุด ต่อ (บริษัท, สาขา, SKU)
@@ -1168,7 +1193,11 @@ route ร้านที่มี `{id}` ทุกตัวถูกกวาด
 | B5 | 34.7 | login ผิดพร้อมกัน ≥ 10 request ต่อ instance → pool `platform` ติดตาย 30 วิ → 500 + งานอื่นของ pool นั้นค้าง (DoS) | `AuthService.login` (platformTx) ถือ connection แล้วเรียก `LoginThrottle` (`REQUIRES_NEW`) ที่ต้องใช้ connection ที่ 2 จาก pool เดียวกัน | เรียก throttle นอก transaction หลัก (หรือแยก pool) ทั้ง login / signup / forgot / verify / unlock + test ยิงพร้อมกันเกินขนาด pool | **แก้แล้ว** 2026-10-24: `AuthService.login` / `PlatformAuthService.login` / `AccountService.signup·forgotPassword` คุมลำดับนอก transaction → `ShopLoginTx` / `PlatformLoginTx` / `AccountTx`; billing catch-up ของ login ย้ายออกจาก transaction ของ login (ซ้อนเหมือนกัน); verify / unlock / ผู้อนุมัติ = appTx → platform (ข้าม pool) คงเดิม; `ThrottlePoolIT` (ตอนนี้ `ThrottleConcurrencyIT`; โค้ดเดิมแดงทั้ง 4); ข้อ 1 ผ่าน (unit 225 / integration 171), ข้อ 34 รันซ้ำไม่มี 500 + regression ข้อ 0 / 3 / 5 / 31 / 32 ผ่าน |
 | B6 | 34.7 | burst login ผิดพร้อมกันลองรหัสได้ 17–18 ครั้ง (เพดาน 5) | `check()` แล้วค่อย `fail()` (check-then-act) | นับแบบ atomic ก่อนตรวจรหัส (upsert คืนค่า) หรือ advisory lock ต่อ key | **แก้แล้ว** 2026-10-24: `LoginThrottle.attempt()` จองสิทธิ์ (upsert +1 แบบ atomic, ล็อกอยู่ = ไม่จอง → 429) ก่อนตรวจรหัส → ผิด `failed()` / ไม่ผิด `passed()` คืนสิทธิ์ (`finally`); signup / forgot `count()` atomic เหมือนกัน; trade-off: สิทธิ์ที่จองระหว่างตรวจรหัสนับรวม (บัญชีเดียวพร้อมกัน > 5 ได้ 429 ชั่วคราว); `ThrottleConcurrencyIT` (โค้ดเดิมแดง 3); ข้อ 1 ผ่าน (unit 225 / integration 175), ข้อ 34 ผ่าน + regression ข้อ 0 / 3 / 5 / 18 / 19 / 22 / 32 |
 | B7 | 35.1 | `docker stop` (SIGTERM, graceful) ระหว่างมีงานเข้า → บางครั้ง (3 / 5 รอบ) lb ได้ `Connection reset by peer` → 502 × 1 (request ไม่ถูกบันทึก ข้อมูลไม่เสีย) | ไม่มีช่วง drain: Tomcat หยุดรับงานขณะ lb ยังส่ง request ใหม่ | เมื่อ SIGTERM ให้ `/readyz` 503 แล้วรับงานต่อ N วิก่อน graceful shutdown + grace period ของ platform ≥ N + 40 วิ (ทดสอบกับ probe ของ platform จริง) — หรือรับเป็นข้อจำกัด | รอผู้ใช้ตัดสิน |
+| B8 | 37.1 | `PUT /products/:id/stock` `unitCost: 1e20` → 500 (`numeric field overflow` ของ `avg_cost numeric(14,4)`) — rollback | กฎไม่จำกัดค่าสูงสุดของเงิน / ทุน แต่คอลัมน์ `numeric(14,x)` จำกัด (กลุ่มเดียวกับ B2) | ErrorHandler แปลง SQLSTATE `22003` (numeric out of range) → 400 `ข้อมูลที่ส่งมาไม่ถูกต้อง` ทุก endpoint (+ test) — ถ้าต้องการข้อความเฉพาะต้องเพิ่มกฎใน spec + mock ก่อน | รอแก้ |
+| B9 | 37.1 | ข้อความมี `\u0000` (เช่นชื่อหมวด) → 500 (`invalid byte sequence for encoding "UTF8": 0x00`) — rollback | PostgreSQL `text` เก็บ NUL ไม่ได้ ไม่มีที่ไหนกรอง | ErrorHandler แปลง SQLSTATE `22021` → 400 `ข้อมูลที่ส่งมาไม่ถูกต้อง` (+ test) หรือปฏิเสธ NUL ตอน parse JSON ทั้งระบบ | รอแก้ |
 
 ### ข้อสังเกต (ตรง spec / mock — รอผู้ใช้ตัดสินว่าจะแก้ spec ไหม)
 - O2 (25.5): ใบลดหนี้คืนเงินสดได้เกินเงินในลิ้นชักของกะ (เงินสดคาดติดลบได้) — mock ตรวจ "เงินสดในลิ้นชักไม่พอ" เฉพาะ cash movement ออก; ถ้าจะห้ามต้องแก้ spec + mock (FrontEnd-An22) ก่อน
+- O3 (37.4): `GET /tax-invoices/buyer?taxId=` ส่งเลขผู้เสียภาษีใน URL — api mask ใน log แล้ว (`taxId=***`) แต่ proxy / lb ทุกตัวที่ log URL เต็ม (nginx ของ stack ทดสอบ, an22-web, platform) จะเก็บเลขนี้;
+  ทางเลือก: ตั้ง log ของ proxy ให้ไม่เก็บ query, หรือแก้ spec เป็น `POST` / ส่ง hash — ต้องแก้ spec + mock (FrontEnd-An22) + an22-web ก่อน
 
