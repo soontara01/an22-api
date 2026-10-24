@@ -820,6 +820,16 @@ cash1 กะเปิดเครื่อง 1 HQ
 | 29.3 | ค้นความลับในไฟล์ | ไม่มี `$2a$`, passwordHash, `*Hash`, tenantId, ข้อมูลบริษัทอื่น | — |
 | 29.4 | access log | ไม่มี body ของ `/company/export` | — |
 
+**ผล** 2026-10-24 · commit `c48fe2d` (image เดียวกับข้อ 0) · `scripts/e2e/29-export.sh` · ✅ 87 / ❌ 0
+- เตรียม: A = std + กะ, บิลพร้อมใบกำกับ, บิลพัก (ลูกค้า + buyer), ใบโอน, ผู้จำหน่าย, ใบแจ้งหนี้ 1 ใบ (SQL); B = บริษัทอื่นที่มีใบแจ้งหนี้
+- ✅ 29.1 boss → 403 `ดาวน์โหลดข้อมูลทั้งบริษัทได้เฉพาะเจ้าของบริษัท`; owner (@api2) → 200 schemaVersion 1, company {id, code, name, taxId}, exportedAt ISO; audit `company_export` "ดาวน์โหลดข้อมูลทั้งบริษัท (JSON)"
+- ✅ 29.2 ทุกตารางที่มี tenant_id (36 ตาราง ยกเว้น doc_counters) จำนวนแถวต่อ collection (camelCase) = count ใน DB ของบริษัท (audit ไม่รวมแถว company_export ของการ export นี้ —
+  บันทึกหลังอ่านข้อมูล); billingInvoices เฉพาะของบริษัทนี้; ไม่มี docCounters / tenantId / key snake_case / key `…Enc`; heldBills[].payload และ taxInvoices[].buyer ถอดรหัสแล้ว
+- ✅ 29.3 ไฟล์ไม่มี `$2a$`, passwordHash, key `…Hash`, รหัสบริษัท B, ใบแจ้งหนี้ของ B (RLS ของ `dt_billing_invoices` กันได้), กุญแจ / token; id ผู้ใช้ = ผู้ใช้ของบริษัทนี้
+- ✅ 29.4 access log ของ `/company/export` 2 บรรทัด (403 + 200) ไม่มี body
+- ✅ ตรวจร่วม: ไม่มี 5xx / ERROR, ไม่มีชื่อลูกค้า / ผู้ซื้อ / ความลับใน log, ทุก error เป็น `{"message"}`
+- หมายเหตุ: รอบแรก ✘ 1 จาก script (นับแถว audit `company_export` ที่บันทึกหลังอ่านข้อมูลรวมไปด้วย) — แก้แล้วรันใหม่
+
 ### ข้อ 30 — ขอลบข้อมูลบริษัท
 | case | ทำอะไร | api คาดหวัง | DB คาดหวัง |
 | --- | --- | --- | --- |
