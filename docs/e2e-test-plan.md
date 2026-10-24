@@ -77,7 +77,7 @@
   อีเมล `owner@<code>.e2e.test` / `boss@<code>.e2e.test`; รอบแรกมี ✘ 1 เพราะ bug ของ script (`login` ใน `$(…)`) — แก้ lib แล้วรันใหม่ผ่าน
 
 ### ข้อ 1 — `./mvnw verify` 1 รอบ
-- คาดหวัง: unit 225 / integration 167 ผ่านทั้งหมด (หลังแก้ B5: integration 171), BUILD SUCCESS — บันทึกจำนวน + เวลา + commit (รันตอนไม่มี stack e2e เปิดอยู่)
+- คาดหวัง: unit 225 / integration 167 ผ่านทั้งหมด (หลังแก้ B5: 171, หลังแก้ B6: 175), BUILD SUCCESS — บันทึกจำนวน + เวลา + commit (รันตอนไม่มี stack e2e เปิดอยู่)
 
 **ผล** 2026-10-23 · commit `e3202ef` · ✅ ผ่าน
 - ✅ unit (surefire) 225 ผ่าน, failures 0 / errors 0 / skipped 0
@@ -957,6 +957,12 @@ cash1 กะเปิดเครื่อง 1 HQ
 - ✅ ส่วนอื่นของข้อ 34 ผ่านเหมือนเดิม
 - regression ด้วย image เดียวกัน: ข้อ 0 ✅ 74, ข้อ 3 ✅ 142, ข้อ 5 ✅ 93, ข้อ 31 ✅ 73, ข้อ 32 ✅ 98 — ไม่มี ❌ (login / signup / forgot / platform login / billing catch-up ทำงานเหมือนเดิม)
 
+**รันซ้ำหลังแก้ B6** 2026-10-24 · commit `e09a4c1` (`BUILD=1 reset.sh`) · ✅ 69 / ❌ 0
+- ✅ 34.7 login ผิดพร้อมกัน 20 request → 401 × 5, 429 × 15; ตัวนับ failures 5 ล็อกแล้ว; login ถัดไป (รหัสถูก) 429; ไม่มี 500
+- ✅ ส่วนอื่นของข้อ 34 ผ่านเหมือนเดิม; ตรวจร่วม 5xx 0 / ERROR 0
+- regression ด้วย image เดียวกัน (ทุกจุดที่ใช้ตัวนับ): ข้อ 0 ✅ 74, ข้อ 3 ✅ 142, ข้อ 5 ✅ 93, ข้อ 18 ✅ 114 (ปลดล็อกหน้าจอ), ข้อ 19 ✅ 117 (ผู้อนุมัติปิดกะ),
+  ข้อ 22 ✅ 68 (ผู้อนุมัติยกเลิกบิล), ข้อ 32 ✅ 98 (platform login)
+
 ### ข้อ 35 — instance ล่ม / restart / graceful shutdown
 | case | ทำอะไร | api คาดหวัง | DB คาดหวัง |
 | --- | --- | --- | --- |
@@ -1134,7 +1140,7 @@ route ร้านที่มี `{id}` ทุกตัวถูกกวาด
 | B3 | 11.1, 12.2 | ตัวเลขทศนิยมใน field `Integer` ถูกตัดเงียบ ๆ: เลขเครื่อง 7.9 → สร้างเครื่อง 7, เดือนผ่อน 2.5 → 2, ตัวคูณหน่วยแพ็ก 2.5 → 2 (mock: ข้อความ "ต้องเป็นจำนวนเต็ม") | Jackson `ACCEPT_FLOAT_AS_INT` แปลงก่อนถึงกฎ | field ที่มีกฎจำนวนเต็มเป็น `Double` + ตรวจในกฎ (แบบ `Promotion`), ปิด `ACCEPT_FLOAT_AS_INT` ทั้งแอป | รอแก้ |
 | B4 | 16.2 | โปร item_discount / bill_discount ส่ง `discount: null` → 200 ใช้ส่วนลดค่าเริ่ม 10% เงียบ ๆ (mock: 400 `กรุณากำหนดส่วนลด`); PUT แทนทั้งตัวที่ไม่ส่ง discount → ส่วนลดเดิมถูกแทนเป็น 10% | `PromotionRules.normalize` ตีความ null ว่า "ไม่ส่ง" แล้วใช้ `DEFAULT_DISCOUNT` | type ไม่ใช่ free_goods + discount null → 400 `กรุณากำหนดส่วนลด` (ไม่เติมค่าเริ่ม); หน้าบ้านส่งครบอยู่แล้ว ไม่กระทบ | รอแก้ |
 | B5 | 34.7 | login ผิดพร้อมกัน ≥ 10 request ต่อ instance → pool `platform` ติดตาย 30 วิ → 500 + งานอื่นของ pool นั้นค้าง (DoS) | `AuthService.login` (platformTx) ถือ connection แล้วเรียก `LoginThrottle` (`REQUIRES_NEW`) ที่ต้องใช้ connection ที่ 2 จาก pool เดียวกัน | เรียก throttle นอก transaction หลัก (หรือแยก pool) ทั้ง login / signup / forgot / verify / unlock + test ยิงพร้อมกันเกินขนาด pool | **แก้แล้ว** 2026-10-24: `AuthService.login` / `PlatformAuthService.login` / `AccountService.signup·forgotPassword` คุมลำดับนอก transaction → `ShopLoginTx` / `PlatformLoginTx` / `AccountTx`; billing catch-up ของ login ย้ายออกจาก transaction ของ login (ซ้อนเหมือนกัน); verify / unlock / ผู้อนุมัติ = appTx → platform (ข้าม pool) คงเดิม; `ThrottlePoolIT` (ตอนนี้ `ThrottleConcurrencyIT`; โค้ดเดิมแดงทั้ง 4); ข้อ 1 ผ่าน (unit 225 / integration 171), ข้อ 34 รันซ้ำไม่มี 500 + regression ข้อ 0 / 3 / 5 / 31 / 32 ผ่าน |
-| B6 | 34.7 | burst login ผิดพร้อมกันลองรหัสได้ 17–18 ครั้ง (เพดาน 5) | `check()` แล้วค่อย `fail()` (check-then-act) | นับแบบ atomic ก่อนตรวจรหัส (upsert คืนค่า) หรือ advisory lock ต่อ key | **แก้แล้ว** 2026-10-24: `LoginThrottle.attempt()` จองสิทธิ์ (upsert +1 แบบ atomic, ล็อกอยู่ = ไม่จอง → 429) ก่อนตรวจรหัส → ผิด `failed()` / ไม่ผิด `passed()` คืนสิทธิ์ (`finally`); signup / forgot `count()` atomic เหมือนกัน; trade-off: สิทธิ์ที่จองระหว่างตรวจรหัสนับรวม (บัญชีเดียวพร้อมกัน > 5 ได้ 429 ชั่วคราว); `ThrottleConcurrencyIT` (โค้ดเดิมแดง 3) — รอรันข้อ 34 ซ้ำ |
+| B6 | 34.7 | burst login ผิดพร้อมกันลองรหัสได้ 17–18 ครั้ง (เพดาน 5) | `check()` แล้วค่อย `fail()` (check-then-act) | นับแบบ atomic ก่อนตรวจรหัส (upsert คืนค่า) หรือ advisory lock ต่อ key | **แก้แล้ว** 2026-10-24: `LoginThrottle.attempt()` จองสิทธิ์ (upsert +1 แบบ atomic, ล็อกอยู่ = ไม่จอง → 429) ก่อนตรวจรหัส → ผิด `failed()` / ไม่ผิด `passed()` คืนสิทธิ์ (`finally`); signup / forgot `count()` atomic เหมือนกัน; trade-off: สิทธิ์ที่จองระหว่างตรวจรหัสนับรวม (บัญชีเดียวพร้อมกัน > 5 ได้ 429 ชั่วคราว); `ThrottleConcurrencyIT` (โค้ดเดิมแดง 3); ข้อ 1 ผ่าน (unit 225 / integration 175), ข้อ 34 ผ่าน + regression ข้อ 0 / 3 / 5 / 18 / 19 / 22 / 32 |
 
 ### ข้อสังเกต (ตรง spec / mock — รอผู้ใช้ตัดสินว่าจะแก้ spec ไหม)
 - O2 (25.5): ใบลดหนี้คืนเงินสดได้เกินเงินในลิ้นชักของกะ (เงินสดคาดติดลบได้) — mock ตรวจ "เงินสดในลิ้นชักไม่พอ" เฉพาะ cash movement ออก; ถ้าจะห้ามต้องแก้ spec + mock (FrontEnd-An22) ก่อน
