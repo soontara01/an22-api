@@ -801,6 +801,17 @@ cash1 กะเปิดเครื่อง 1 HQ
 | 28.3 | onboarding (บริษัทใหม่ / std) | `{terminals 0, categories 0, products 0, prices 0, users 1}` / ตามที่สร้าง | ตรงกับ count |
 | 28.4 | `/me` ช่วงทดลองเหลือ ≤ 3 วัน (เลื่อน trial_ends_on) | billing `{level: warn, text: "ทดลองใช้เหลืออีก 3 วัน (ถึง d/m/พ.ศ.) — ใบแจ้งหนี้แรกออกวันที่ d/m/พ.ศ."}` เฉพาะ admin; staff billing null | — |
 
+**ผล** 2026-10-24 · commit `c48fe2d` (image เดียวกับข้อ 0) · `scripts/e2e/28-subscription.sh` · ✅ 68 / ❌ 0
+- ✅ 28.1 cash1 → 403 `ดูแพ็กเกจได้เฉพาะผู้ดูแลระบบ`; boss (@api2) → planId pro, status trial, invoices [], usage {สาขา 2, ผู้ใช้ 5, เครื่อง 3} = นับที่ใช้งานใน DB,
+  trialEndsOn +14 / nextInvoiceOn +15; ปิดผู้ใช้ 1 คน → usage ผู้ใช้ 4
+- ✅ 28.2 boss เปลี่ยน → 403 `เปลี่ยนแพ็กเกจได้เฉพาะเจ้าของบริษัท`; owner `gold` → `ไม่มีแพ็กเกจนี้` (plan ไม่เปลี่ยน); owner → starter 200 แม้ใช้เกิน (สาขา 2 / เครื่อง 3),
+  plan_id starter, audit `plan_change` "เปลี่ยนเป็นแพ็กเกจ Starter (฿590 / เดือน)"; แล้วเพิ่มสาขา → 403 `แพ็กเกจ Starter ใช้สาขาได้ 1 สาขา — …`; @api2 เห็น starter ทันที; เปลี่ยนกลับ standard / pro ได้
+- ✅ 28.3 cash1 → 403 `ดูขั้นตอนเริ่มต้นใช้งานได้เฉพาะผู้ดูแลระบบ`; std → 3 / 5 / 5 / 5 / 5 = count ใน DB; บริษัทใหม่ → `{terminals 0, categories 0, products 0, prices 0, users 1}`
+- ✅ 28.4 (SQL) trial เหลือ 3 วัน → boss / owner (@api2) `/me` billing `{warn, "ทดลองใช้เหลืออีก 3 วัน (ถึง d/m/พ.ศ.) — ใบแจ้งหนี้แรกออกวันที่ d/m/พ.ศ."}`;
+  cash1 billing null; เหลือ 4 วัน → null; วันสุดท้าย → "เหลืออีก 0 วัน"; ยังไม่มีใบแจ้งหนี้
+- ✅ ตรวจร่วม: ไม่มี 5xx / ERROR, ไม่มีความลับใน log, ทุก error เป็น `{"message"}`
+- หมายเหตุ: รอบแรก ✘ 1 จาก script (`/me` ไม่มี `company.planId` — ตรวจผ่าน `/company/subscription` แทน) — แก้แล้วรันใหม่
+
 ### ข้อ 29 — export ข้อมูลทั้งบริษัท
 | case | ทำอะไร | api คาดหวัง | DB คาดหวัง |
 | --- | --- | --- | --- |
