@@ -992,6 +992,17 @@ cash1 กะเปิดเครื่อง 1 HQ
 | 36.2 | 20,000 พอดี | 200 20,000 รายการ | — |
 | 36.3 | ตั้ง `statement_timeout` ของ `an22_app` = 3s ชั่วคราว (ตัด connection เดิมให้ต่อใหม่) + psql ถือ `LOCK TABLE dt_sales` ไว้ แล้ว `GET /sales` | รอ ~3 วิ → 503 `ระบบใช้เวลานานเกินไป กรุณาลองใหม่หรือลดช่วงข้อมูล`; endpoint อื่นยังปกติ; คืนค่า 30s + ปล่อย lock → ปกติ | ไม่มี transaction ค้าง (`pg_stat_activity` idle in transaction = 0) |
 
+**ผล** 2026-10-24 · commit `b4179de` (image `e09a4c1`) · `scripts/e2e/36-limits.sh` · ✅ 62 / ❌ 0
+- วิธีใส่ข้อมูล: บิล (ไม่มีบรรทัด) + audit (actor system, `stock_out`) สังเคราะห์ด้วย SQL ในวัน 2025-06-15 ของบริษัทใหม่ (ไม่ปนข้อมูลจริง) แล้วลบทิ้งท้าย 36.1 (ข้อ 38 ตรวจทั้ง DB)
+- ✅ 36.2 20,000 แถวพอดี → 200 ครบ 20,000: `GET /sales` ~1.7–2.3 วิ / 12.4 MB (บิลไม่มีบรรทัด — บิลจริงมีบรรทัด + การชำระจะใหญ่กว่านี้หลายเท่า), `GET /audit-log` (api2) ~0.5 วิ / 3.7 MB
+- ✅ 36.1 20,001 แถว → 400 `ข้อมูลมากกว่า 20,000 รายการ กรุณาเลือกช่วงวันที่ให้สั้นลง` ทั้ง `/sales` และ `/audit-log`;
+  กรอง `action=price_change` ในช่วงเดียวกัน → 200 (กรองใน SQL ก่อน LIMIT), วันอื่น → 200 ว่าง
+- ✅ 36.3 `ALTER ROLE an22_app SET statement_timeout = '3s'` + ตัด connection ของ an22_app (pgbouncer ต่อใหม่ — request แรกหลังตัดได้ 200) + psql ถือ `LOCK TABLE dt_sales` →
+  `GET /sales` ที่ api1 / api2 รอ ~3.06–3.09 วิ → 503 `ระบบใช้เวลานานเกินไป กรุณาลองใหม่หรือลดช่วงข้อมูล`, log `db timeout GET …` ระดับ WARN;
+  ระหว่างล็อก `/products`, `/me` ปกติ; คืน 30s + ปล่อยล็อก → `/sales` 200, `idle in transaction` = 0
+- ✅ ตรวจร่วม: 5xx 2 / ERROR 2 = access log ของ 503 ที่ตั้งใจ (RequestLogFilter log 5xx เป็น ERROR), ไม่มีความลับใน log, ทุก error เป็น `{"message"}`
+- หมายเหตุ: รอบแรก script ใส่ audit action `stock_in` (ไม่มีใน CHECK) และไม่ได้อนุญาต ERROR ของ access log 503 — แก้ script แล้วรันใหม่
+
 ### ข้อ 37 — ความปลอดภัย / input แปลก / log
 | case | ทำอะไร | api คาดหวัง | DB คาดหวัง |
 | --- | --- | --- | --- |
