@@ -888,6 +888,20 @@ cash1 กะเปิดเครื่อง 1 HQ
 | 32.6 | รับชำระใบค้าง (บริษัทระงับ overdue) / ซ้ำ / id ไม่มี | 200 เปิดใช้งานเอง, openAmount 0 / `ใบแจ้งหนี้นี้ชำระแล้ว` / 404 `ไม่พบใบแจ้งหนี้` | status paid + paid_at, audit `invoice_paid` ref = เลขใบ "฿3490" |
 | 32.7 | `GET /platform/outbox` | 404 `ไม่มี endpoint GET /platform/outbox` (ตกลงไว้) | — |
 
+**ผล** 2026-10-24 · commit `c48fe2d` (image เดียวกับข้อ 0) · `scripts/e2e/32-platform.sh` · ✅ 98 / ❌ 0
+- ✅ 32.1 ไม่มี token / token ร้าน กับ `/platform/companies` → 401 `เซสชันผู้ให้บริการหมดอายุ กรุณาเข้าสู่ระบบใหม่`
+- ✅ 32.2 รายการ (@api2) = ทุกบริษัทใน `dt_companies` รวมที่ลบแล้ว (deletedAt); รายละเอียด usage 2 / 5 / 3, openAmount 0, owner, status trial ตรง DB ไม่มี passwordHash; id ไม่มี → 404 `ไม่พบบริษัท`
+- ✅ 32.3 เปลี่ยนเป็น standard → 200; audit actor `platform`, user_id null, user_name = ชื่อผู้ดูแลแพลตฟอร์ม, "ผู้ให้บริการเปลี่ยนเป็นแพ็กเกจ Standard"; `gold` → `ไม่มีแพ็กเกจนี้` (plan ไม่เปลี่ยน)
+- ✅ 32.4 ระงับไม่มีเหตุผล → `กรุณากรอกเหตุผลที่ระงับ`; ถูก → 200 suspend_note (ตัดช่องว่าง), audit `company_suspend`; ซ้ำ → `บริษัทนี้ถูกระงับอยู่แล้ว`;
+  staff login → 401 `บริษัทนี้ถูกผู้ให้บริการระงับการใช้งาน — …`, token เดิม → 401; เปิดคืน (@api2) → 200 (suspendNote `""` ตาม mock, DB null), audit `company_reactivate`;
+  ซ้ำ → `บริษัทนี้ใช้งานอยู่แล้ว`; บริษัทค้างชำระ (catch-up ระงับเอง) → `บริษัทค้างชำระ — บันทึกรับชำระใบแจ้งหนี้แทน`; บริษัทรอลบ → `บริษัทอยู่ระหว่างรอลบข้อมูล — ให้เจ้าของบริษัทยกเลิกคำขอลบ`
+- ✅ 32.5 รหัสสั้น → `รหัสผ่านต้องมีอย่างน้อย 4 ตัว`; ถูก → 200 body ว่าง, owner login รหัสใหม่ได้ รหัสเดิม 401; audit `user_password` "ผู้ให้บริการตั้งรหัสผ่านใหม่ให้เจ้าของบริษัท"
+- ✅ 32.6 รับชำระใบค้างของบริษัทที่ถูกระงับ overdue (@api2) → 200 เปิดใช้งานเอง openAmount 0; status paid + paid_at; audit `invoice_paid` ref = เลขใบ "฿3490"; owner login ได้;
+  ซ้ำ → `ใบแจ้งหนี้นี้ชำระแล้ว`; id ไม่มี → 404 `ไม่พบใบแจ้งหนี้`
+- ✅ 32.7 `GET /platform/outbox` → 404 `ไม่มี endpoint GET /platform/outbox`
+- ✅ ตรวจร่วม: ไม่มี 5xx / ERROR, ไม่มีความลับใน log, ทุก error เป็น `{"message"}`
+- หมายเหตุ: รอบแรก ✘ 1 จาก script (suspendNote หลังเปิดคืนเป็น `""` ตาม mock ไม่ใช่ null) — แก้แล้วรันใหม่
+
 ### ข้อ 33 — purge ข้อมูลบริษัท
 | case | ทำอะไร | api คาดหวัง | DB คาดหวัง |
 | --- | --- | --- | --- |
