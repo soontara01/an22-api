@@ -182,6 +182,8 @@ src/test/java/com/an22/api/
 ## JSON / error
 
 - context path `/api` (path ใน spec ไม่รวม `/api`), port 8080; JSON ไม่ละ `null` (`default-property-inclusion: always`), เวลา ISO-8601 (`Instant` → `…Z`)
+- ทศนิยมเข้า field `Integer` / `Long` → 400 ข้อความกลาง (`accept-float-as-int: false`, ไม่ตัดเงียบ — B3); field ที่ mock มีกฎ "จำนวนเต็ม" ของตัวเอง
+  ใช้ `Double` + ตรวจในกฎ หรือ `@JsonDeserialize(using = IntegerOrInvalid.class)` (ทศนิยม → ค่านอกช่วงของกฎ → ข้อความของ mock)
 - เวลาท้องถิ่น Asia/Bangkok ทั้ง container + JVM (`Application.main`, `Dockerfile`, test) → log +07:00, session DB `TimeZone = Asia/Bangkok`;
   **กฎ / วันธุรกิจยังต้องใช้ `Clock` ที่ inject เสมอ** (test แทนด้วย Clock ปลอม) — ห้าม `LocalDate.now()` / `Instant.now()` ตรง ๆ
 - error ทุกตัว `{ "message": "<ไทย>" }` ข้อความตามกฎ / mock ทุกตัวอักษร: `throw new ApiException(status, msg)` (หรือ `ApiException.badRequest/forbidden/notFound`)

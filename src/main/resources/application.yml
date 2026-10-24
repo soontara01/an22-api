@@ -21,6 +21,9 @@ spring:
   jackson:
     # api-contract.md: ห้ามละ field ที่เป็น null (B24)
     default-property-inclusion: always
+    deserialization:
+      # ทศนิยมเข้า Integer / Long → 400 (ไม่ตัดเงียบ ๆ — E2E B3); field ที่มีกฎจำนวนเต็มของ mock ใช้ IntegerOrInvalid / Double
+      accept-float-as-int: false
   mvc:
     problemdetails:
       enabled: false
