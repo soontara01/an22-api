@@ -186,6 +186,8 @@ src/test/java/com/an22/api/
   **กฎ / วันธุรกิจยังต้องใช้ `Clock` ที่ inject เสมอ** (test แทนด้วย Clock ปลอม) — ห้าม `LocalDate.now()` / `Instant.now()` ตรง ๆ
 - error ทุกตัว `{ "message": "<ไทย>" }` ข้อความตามกฎ / mock ทุกตัวอักษร: `throw new ApiException(status, msg)` (หรือ `ApiException.badRequest/forbidden/notFound`)
 - ข้อความกลาง (`ErrorResponse`): 404 / 405 `ไม่มี endpoint <METHOD> <path>`, 400 `ข้อมูลที่ส่งมาไม่ถูกต้อง`, 500 `ระบบขัดข้อง กรุณาลองใหม่` (ไม่มีรายละเอียด), 401 `เซสชันหมดอายุ กรุณาเข้าสู่ระบบใหม่`
+- DB ปฏิเสธค่าที่กฎไม่ได้ตรวจ (CHECK 23514, ตัวเลขเกินคอลัมน์ 22003, NUL ใน text 22021) → `ErrorHandler` ตอบ 400 ข้อความกลาง + log WARN แค่ SQLSTATE (ไม่ log ข้อความ DB — มีค่าของแถว);
+  เป็นตาข่ายเท่านั้น — กฎที่ต้องมีข้อความเฉพาะยังต้องอยู่ใน `rules/` ตาม spec
 
 ## Log
 
