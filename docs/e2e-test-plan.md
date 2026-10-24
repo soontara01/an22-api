@@ -909,6 +909,16 @@ cash1 กะเปิดเครื่อง 1 HQ
 | 33.2 | เลื่อน purge_after = วันนี้ แล้ว purge | 200 deletedAt, name คงอยู่, owner null, usage 0 | **ทุกตารางที่มี tenant_id = 0 แถว**, reset token 0, `dt_companies` คง deleted_at + deleted_name, `dt_billing_invoices` คงอยู่, บริษัทอื่น (count + max updated_at) ไม่เปลี่ยน |
 | 33.3 | หลัง purge: login / token เดิม / signup รหัสเดิม / platform สั่งงาน / purge ซ้ำ | 401 / 401 / `รหัสบริษัทนี้ถูกใช้แล้ว` / `บริษัทนี้ถูกลบข้อมูลแล้ว` / `บริษัทนี้ถูกลบข้อมูลแล้ว` | — |
 
+**ผล** 2026-10-24 · commit `c48fe2d` (image เดียวกับข้อ 0) · `scripts/e2e/33-purge.sh` · ✅ 97 / ❌ 0
+- เตรียม: A = std + บิลพร้อมใบกำกับ + ใบเปลี่ยน, บิลเมื่อวาน + ใบลดหนี้, กะ 2 กะ, บิลพัก, ใบโอน, ผู้จำหน่าย, โปร, สิทธิ์เมนู, ลิงก์ reset, ใบแจ้งหนี้ (paid) → 102 แถวใน 30 ตาราง; B = std
+- ✅ 33.1 purge ไม่มีคำขอ → `บริษัทนี้ไม่ได้ขอลบข้อมูล`; ขอลบแล้ว purge ก่อนครบ 30 วัน → `ลบข้อมูลได้ตั้งแต่วันที่ d/m/พ.ศ.`; ข้อมูลยังอยู่ (+ audit deletion_request)
+- ✅ 33.2 เลื่อน purge_after = วันนี้ แล้ว purge (@api2) → 200 deletedAt, name คงอยู่, owner null, usage 0; **ทุกตารางที่มี tenant_id = 0 แถว**, ลิงก์ reset 0,
+  `dt_companies` คง deleted_at + deleted_name + code, `dt_billing_invoices` คงอยู่ 1 ใบ; บริษัท B (count + max stamp ทุกตาราง) ไม่เปลี่ยน
+- ✅ 33.3 login → 401 ข้อความกลาง; token เดิมของ owner / boss → 401; signup รหัสเดิม (ตัวเล็ก) → `รหัสบริษัทนี้ถูกใช้แล้ว`;
+  platform เปลี่ยนแพ็กเกจ / ระงับ / เปิดคืน / ตั้งรหัส owner / purge ซ้ำ → `บริษัทนี้ถูกลบข้อมูลแล้ว`; รายละเอียดยังดูได้ (deletedAt + ใบแจ้งหนี้); บริษัท B ใช้งานปกติ
+- ✅ ตรวจร่วม: ไม่มี 5xx / ERROR, ไม่มีความลับใน log, ทุก error เป็น `{"message"}`
+- หมายเหตุ: รอบแรก ✘ 1 จาก script (ไม่ได้นับ audit `deletion_request` ที่เพิ่มตอนขอลบ) — แก้แล้วรันใหม่; รายละเอียดบริษัทที่ลบแล้วยังแสดง status ตามรอบบิล (เช่น trial) — ไม่ใช่ error
+
 ### ข้อ 34 — พร้อมกันข้าม instance (concurrency)
 | case | ทำอะไร | api คาดหวัง | DB คาดหวัง |
 | --- | --- | --- | --- |
