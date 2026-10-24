@@ -59,7 +59,7 @@ src/main/java/com/an22/api/
                  PlanRules, CostVisibility, SubscriptionRules, CategoryRules, Suppliers, PaymentMethodRules, PosTerminalRules, Money, ProductRules,
                  Costing, SerialRules, PriceRules, PromotionRules, TransferRules, PosPricing, PosPayment — ผลตรง golden fixtures ผ่าน FixturesTest,
                  ListLimits, ShiftRules, SaleRules, TaxInvoiceRules, CreditNoteRules, ExchangeRules, AuditRules, SignupRules, CompanyDataRules, PlatformRules)
-  health/        /healthz, /readyz
+  health/        /healthz, /readyz (HealthService ใช้ TransactionTemplate ใน try — `@Transactional` ขอ connection ก่อนเข้า method จับ error ไม่ได้ → 500, B1)
   auth/          login / verify / me (AuthController → AuthService → ShopLoginTx / SessionService → SessionDao), LoginThrottle (+ Dao), ShopSession, PasswordResetTokens,
                  signup / forgot-password / reset-password (AccountService → AccountTx → AccountDao, platformTx)
   platform/      /platform/auth/login, /platform/me, /platform/companies/* + /platform/invoices/:id/pay (PlatformCompanyService → PlatformCompanyDao,
