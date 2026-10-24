@@ -931,6 +931,26 @@ cash1 กะเปิดเครื่อง 1 HQ
 | 34.7 | login ผิดพร้อมกัน 20 request บัญชีเดียว | ล็อกหลังครบ 5 (ตัวนับ atomic) | failures ไม่หาย |
 | 34.8 | โหลด 200 request พร้อมกัน (อ่าน + เขียน) ผ่าน lb | ไม่มี 5xx, ทุกตัวตอบ | — |
 
+**ผล** 2026-10-24 · commit `c48fe2d` (image เดียวกับข้อ 0) · `scripts/e2e/34-concurrency.sh` · ✅ 65 / ❌ 3 (34.7 ❌ — bug B5 + B6 ของ api; รันซ้ำ 2 รอบได้ผลเดียวกัน)
+- ✅ 34.1 ขาย 40 บิลพร้อมกันเครื่องเดียว (api1 / api2 สลับ) → 200 ทั้งหมด; เลข 0001–0040 ไม่ซ้ำไม่ข้าม (doc counter 40); CBL ลด 40; movement 40 แถว balance ต่อเนื่อง (−1 ทุกแถว ไม่ซ้ำ)
+- ✅ 34.2 ขายชิ้นสุดท้าย 10 request → 200 × 1, 400 × 9 (`สต็อกคงเหลือไม่พอ` จาก ledger ส่วนใหญ่ / `ONE-001 สต็อกไม่พอ (คงเหลือ 0 ชิ้น)` เมื่อมาหลัง commit); stock 0 ไม่ติดลบ, บิล 1 ใบ, เลขต่อเนื่อง
+- ✅ 34.3 ขาย NB0003 พร้อมกัน 4 request → สำเร็จ 1 อื่น `ซีเรียล NB0003 ไม่อยู่ในคลังของ NB-001`; sold 1 ครั้ง ไม่มี 5xx
+- ✅ 34.4 เปิดกะเครื่องเดียวกัน (boss / mgr) → 200 + `เครื่องนี้มีกะที่เปิดอยู่แล้ว`; รับใบโอนเดียวกัน → 200 + `ใบโอนนี้รับหรือยกเลิกไปแล้ว` (BN +2 ครั้งเดียว);
+  ยกเลิกบิลเดียวกัน 4 request → 200 + `ยกเลิกได้เฉพาะบิลที่ชำระแล้ว` × 3 (คืนสต็อกครั้งเดียว); ใบลดหนี้คืนเต็มบิล 4 request → 200 + `MS-001 คืนได้ไม่เกิน 0 ชิ้น` × 3 (ใบเดียว ฿700)
+- ✅ 34.5 starter มีผู้ใช้ 4 คน เพิ่ม 5 request พร้อมกัน → 200 × 1, 403 เพดานแพ็กเกจ × 4; active = 5
+- ✅ 34.6 ราคาช่วงเดียวกันพร้อมกัน 4 request → สำเร็จ 1, ที่เหลือ 400 `ช่วงวันที่ทับกับราคา …` (ไม่ใช่ 5xx); 1 ช่วง
+- ❌ 34.7 login ผิดพร้อมกัน 20 request บัญชีเดียว → 401 × 17–18 และ **500 × 2–3 หลังรอ 30 วิ**; ตัวนับไม่หาย (failures = จำนวน 401 พอดี) และล็อกหลังจบ (login ถัดไป 429) แต่:
+  - **B5**: `AuthService.login` (`@Transactional("platformTx")`) ถือ connection ของ pool `platform` แล้วเรียก `LoginThrottle.check()/fail()` ที่เป็น `REQUIRES_NEW`
+    ต้องขอ connection ที่ 2 จาก pool เดียวกัน → login พร้อมกัน ≥ ขนาด pool (10) ต่อ instance = pool ติดตาย (`platform - Connection is not available … total=10, active=10, waiting=9`)
+    จนครบ connectionTimeout 30 วิ → 500 + log ERROR; ระหว่างนั้นทุกงานที่ใช้ pool platform ของ instance นั้นค้าง (login / signup / ลืมรหัส / platform / billing)
+    — login ผิดรัว ๆ (หรือคนเข้างานพร้อมกันตอนเปิดร้าน) ทำให้ instance ค้างได้ (ช่องทาง DoS)
+  - **B6**: burst เดียวลองรหัสได้ 17–18 ครั้ง (เพดาน 5) — `check()` ของทุก request ผ่านก่อนที่ `fail()` จะนับ (check-then-act) ล็อกเกิดหลังจบ burst
+  - เสนอแก้ B5: ไม่ซ้อน transaction — ให้ login / signup / forgot เรียก throttle (`REQUIRES_NEW`) นอก transaction หลัก (orchestrate ใน service ที่ไม่ `@Transactional`
+    หรือแยก pool ของ throttle) + test ที่ยิง login พร้อมกันเกินขนาด pool; B6: นับก่อนตรวจรหัส (upsert เพิ่มตัวนับแบบ atomic คืนค่าแล้วตัดสิน 429) หรือ advisory lock ต่อ key ระหว่าง check → fail
+- ✅ 34.8 โหลด 200 request พร้อมกันผ่าน lb (GET products / me / sales + POST categories 50) → 200 × 200 ใน ~2 วิ, หมวดใหม่ครบ 50, ไม่มี transaction ค้าง (`idle in transaction` = 0)
+- ❌ ตรวจร่วม: 5xx 2 / log ERROR 4 จาก B5 (ไม่มี 5xx อื่น), ไม่มีความลับใน log, ทุก error เป็น `{"message"}`
+- หมายเหตุ: รอบแรกมี ✘ จาก script (ไฟล์ status ไม่มี newline, `set -e` หยุดกลาง 34.4, SIGPIPE ใน `finish`) — แก้แล้วรันใหม่ 2 รอบ
+
 ### ข้อ 35 — instance ล่ม / restart / graceful shutdown
 | case | ทำอะไร | api คาดหวัง | DB คาดหวัง |
 | --- | --- | --- | --- |
@@ -1107,6 +1127,8 @@ route ร้านที่มี `{id}` ทุกตัวถูกกวาด
 | B2 | 10.4, 12.2 | ค่าที่ DB มี CHECK แต่กฎไม่ตรวจ → 500 + log ERROR (คาด 400): ช่องทาง `cashRounding` / `closeCheck`, ผู้จำหน่าย `branchType`, SKU ว่าง / `saleStatus` / `vatType` / `cost` < 0 / `warrantyMonths` < 0 / `serialLength` 0 | กฎไม่ตรวจ → ชน CHECK ของ DB | ตรวจ enum ใน rules → 400 แบบ `knownRole`; ไล่คอลัมน์ enum อื่น (ข้อ 37.1) | รอแก้ |
 | B3 | 11.1, 12.2 | ตัวเลขทศนิยมใน field `Integer` ถูกตัดเงียบ ๆ: เลขเครื่อง 7.9 → สร้างเครื่อง 7, เดือนผ่อน 2.5 → 2, ตัวคูณหน่วยแพ็ก 2.5 → 2 (mock: ข้อความ "ต้องเป็นจำนวนเต็ม") | Jackson `ACCEPT_FLOAT_AS_INT` แปลงก่อนถึงกฎ | field ที่มีกฎจำนวนเต็มเป็น `Double` + ตรวจในกฎ (แบบ `Promotion`), ปิด `ACCEPT_FLOAT_AS_INT` ทั้งแอป | รอแก้ |
 | B4 | 16.2 | โปร item_discount / bill_discount ส่ง `discount: null` → 200 ใช้ส่วนลดค่าเริ่ม 10% เงียบ ๆ (mock: 400 `กรุณากำหนดส่วนลด`); PUT แทนทั้งตัวที่ไม่ส่ง discount → ส่วนลดเดิมถูกแทนเป็น 10% | `PromotionRules.normalize` ตีความ null ว่า "ไม่ส่ง" แล้วใช้ `DEFAULT_DISCOUNT` | type ไม่ใช่ free_goods + discount null → 400 `กรุณากำหนดส่วนลด` (ไม่เติมค่าเริ่ม); หน้าบ้านส่งครบอยู่แล้ว ไม่กระทบ | รอแก้ |
+| B5 | 34.7 | login ผิดพร้อมกัน ≥ 10 request ต่อ instance → pool `platform` ติดตาย 30 วิ → 500 + งานอื่นของ pool นั้นค้าง (DoS) | `AuthService.login` (platformTx) ถือ connection แล้วเรียก `LoginThrottle` (`REQUIRES_NEW`) ที่ต้องใช้ connection ที่ 2 จาก pool เดียวกัน | เรียก throttle นอก transaction หลัก (หรือแยก pool) ทั้ง login / signup / forgot / verify / unlock + test ยิงพร้อมกันเกินขนาด pool | รอแก้ (แนะนำแก้ก่อน) |
+| B6 | 34.7 | burst login ผิดพร้อมกันลองรหัสได้ 17–18 ครั้ง (เพดาน 5) | `check()` แล้วค่อย `fail()` (check-then-act) | นับแบบ atomic ก่อนตรวจรหัส (upsert คืนค่า) หรือ advisory lock ต่อ key | รอแก้ |
 
 ### ข้อสังเกต (ตรง spec / mock — รอผู้ใช้ตัดสินว่าจะแก้ spec ไหม)
 - O2 (25.5): ใบลดหนี้คืนเงินสดได้เกินเงินในลิ้นชักของกะ (เงินสดคาดติดลบได้) — mock ตรวจ "เงินสดในลิ้นชักไม่พอ" เฉพาะ cash movement ออก; ถ้าจะห้ามต้องแก้ spec + mock (FrontEnd-An22) ก่อน

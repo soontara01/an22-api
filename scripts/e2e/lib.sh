@@ -364,7 +364,7 @@ finish() {
   if ((n <= E2E_ALLOW_5XX)); then pass "access log 5xx $n (อนุญาต $E2E_ALLOW_5XX)"; else fail "access log 5xx $n (อนุญาต $E2E_ALLOW_5XX)"; fi
   n=$(grep -c '"level":"ERROR"' <<<"$all" || true)
   if ((n <= E2E_ALLOW_ERROR_LOG)); then pass "log ERROR $n (อนุญาต $E2E_ALLOW_ERROR_LOG)"; else
-    fail "log ERROR $n (อนุญาต $E2E_ALLOW_ERROR_LOG)"; grep '"level":"ERROR"' <<<"$all" | head -3 | cut -c1-300; fi
+    fail "log ERROR $n (อนุญาต $E2E_ALLOW_ERROR_LOG)"; grep '"level":"ERROR"' <<<"$all" | head -3 | cut -c1-300 || true; fi
   # ความลับ: กุญแจ / รหัส DB / รหัสผู้ใช้ที่ใช้ทดสอบ / token ที่ออกในรอบนี้
   local secrets=() v
   for v in DB_SUPERUSER_PASSWORD DB_ADMIN_PASSWORD DB_OWNER_PASSWORD DB_APP_PASSWORD DB_PLATFORM_PASSWORD PII_HASH_KEY; do
