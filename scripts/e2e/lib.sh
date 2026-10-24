@@ -12,6 +12,7 @@
 #   std_company TAG [plan]                 ชุดข้อมูลมาตรฐาน (หัวข้อ 3) → ตัวแปร CODE TENANT BR_HQ … P_MS …, token T_OWNER
 #   hmac VALUE (hex) · jwt CLAIMS_JSON [kid] · shop_claims TENANT USER_ID [ttl วินาที] · logs SVC SINCE [UNTIL] · now_utc
 #   save_logs · recreate_api · env_set KEY VALUE · jwt_part TOKEN 0|1
+#   E2E_EXTRA_SECRETS="ค่า1 ค่า2"             ค่าที่ห้ามอยู่ใน log เพิ่มเติม — แยกคำตามช่องว่าง (ใช้คำที่ไม่มีช่องว่าง)
 #   finish                                 ตรวจร่วม (5xx / ERROR / ความลับใน log / รูปแบบ error) + สรุป, exit ≠ 0 เมื่อมี ✘
 #
 # ต้องมี docker, curl, jq, openssl; stack ไม่ทำงาน → เปิดเอง (ไม่ล้าง DB — ล้างด้วย reset.sh)
