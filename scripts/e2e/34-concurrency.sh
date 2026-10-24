@@ -142,6 +142,7 @@ done; wait
 echo "     $(dist l7) · แถวตัวนับ: $(sql "SELECT failures || ' locked=' || (locked_until IS NOT NULL) FROM dt_login_throttle WHERE key_hash = decode('$(hmac "shop:$CODE:mgr")', 'hex')")"
 n401=$(grep -l '^401$' "$E2E_WORK"/l7.*.status | grep -c . || true)
 row=$(sql "SELECT failures || ':' || (locked_until IS NOT NULL) FROM dt_login_throttle WHERE key_hash = decode('$(hmac "shop:$CODE:mgr")', 'hex')")
+check "(B6) ลองรหัสได้ไม่เกินเพดาน 5 ครั้ง (401 ≤ 5)" yes "$([[ $n401 -le 5 ]] && echo yes || echo "no ($n401 ครั้ง)")"
 check "401 อย่างน้อย 5 ที่เหลือ 429" yes "$([[ $n401 -ge 5 && $(dist l7) =~ ^401×[0-9]+( 429×[0-9]+)?$ ]] && echo yes || echo "no ($(dist l7))")"
 check "failures = จำนวน 401 (ตัวนับไม่หาย), ล็อกแล้ว" "$n401:true" "$row"
 login "$CODE" mgr pass1234

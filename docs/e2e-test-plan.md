@@ -951,6 +951,12 @@ cash1 กะเปิดเครื่อง 1 HQ
 - ❌ ตรวจร่วม: 5xx 2 / log ERROR 4 จาก B5 (ไม่มี 5xx อื่น), ไม่มีความลับใน log, ทุก error เป็น `{"message"}`
 - หมายเหตุ: รอบแรกมี ✘ จาก script (ไฟล์ status ไม่มี newline, `set -e` หยุดกลาง 34.4, SIGPIPE ใน `finish`) — แก้แล้วรันใหม่ 2 รอบ
 
+**รันซ้ำหลังแก้ B5** 2026-10-24 · commit `a0359cc` (`BUILD=1 reset.sh` — image ใหม่, DB ใหม่) · ✅ 68 / ❌ 1 (34.7 ❌ — B6 ยังอยู่)
+- ✅ B5: 34.7 รัน 4 รอบ ได้ 401 × 20 ทุกรอบ **ไม่มี 500 / ไม่ค้าง 30 วิ**; ตรวจร่วม 5xx 0 / ERROR 0
+- ❌ B6: burst เดียวลองรหัสได้ 20 ครั้ง (เพดาน 5) — เพิ่ม check `(B6) ลองรหัสได้ไม่เกินเพดาน 5 ครั้ง` ให้แดงตามจริง (check เดิม "401 ≥ 5 ที่เหลือ 429" ผ่านได้แม้ 401 ทั้ง 20)
+- ✅ ส่วนอื่นของข้อ 34 ผ่านเหมือนเดิม
+- regression ด้วย image เดียวกัน: ข้อ 0 ✅ 74, ข้อ 3 ✅ 142, ข้อ 5 ✅ 93, ข้อ 31 ✅ 73, ข้อ 32 ✅ 98 — ไม่มี ❌ (login / signup / forgot / platform login / billing catch-up ทำงานเหมือนเดิม)
+
 ### ข้อ 35 — instance ล่ม / restart / graceful shutdown
 | case | ทำอะไร | api คาดหวัง | DB คาดหวัง |
 | --- | --- | --- | --- |
@@ -1127,7 +1133,7 @@ route ร้านที่มี `{id}` ทุกตัวถูกกวาด
 | B2 | 10.4, 12.2 | ค่าที่ DB มี CHECK แต่กฎไม่ตรวจ → 500 + log ERROR (คาด 400): ช่องทาง `cashRounding` / `closeCheck`, ผู้จำหน่าย `branchType`, SKU ว่าง / `saleStatus` / `vatType` / `cost` < 0 / `warrantyMonths` < 0 / `serialLength` 0 | กฎไม่ตรวจ → ชน CHECK ของ DB | ตรวจ enum ใน rules → 400 แบบ `knownRole`; ไล่คอลัมน์ enum อื่น (ข้อ 37.1) | รอแก้ |
 | B3 | 11.1, 12.2 | ตัวเลขทศนิยมใน field `Integer` ถูกตัดเงียบ ๆ: เลขเครื่อง 7.9 → สร้างเครื่อง 7, เดือนผ่อน 2.5 → 2, ตัวคูณหน่วยแพ็ก 2.5 → 2 (mock: ข้อความ "ต้องเป็นจำนวนเต็ม") | Jackson `ACCEPT_FLOAT_AS_INT` แปลงก่อนถึงกฎ | field ที่มีกฎจำนวนเต็มเป็น `Double` + ตรวจในกฎ (แบบ `Promotion`), ปิด `ACCEPT_FLOAT_AS_INT` ทั้งแอป | รอแก้ |
 | B4 | 16.2 | โปร item_discount / bill_discount ส่ง `discount: null` → 200 ใช้ส่วนลดค่าเริ่ม 10% เงียบ ๆ (mock: 400 `กรุณากำหนดส่วนลด`); PUT แทนทั้งตัวที่ไม่ส่ง discount → ส่วนลดเดิมถูกแทนเป็น 10% | `PromotionRules.normalize` ตีความ null ว่า "ไม่ส่ง" แล้วใช้ `DEFAULT_DISCOUNT` | type ไม่ใช่ free_goods + discount null → 400 `กรุณากำหนดส่วนลด` (ไม่เติมค่าเริ่ม); หน้าบ้านส่งครบอยู่แล้ว ไม่กระทบ | รอแก้ |
-| B5 | 34.7 | login ผิดพร้อมกัน ≥ 10 request ต่อ instance → pool `platform` ติดตาย 30 วิ → 500 + งานอื่นของ pool นั้นค้าง (DoS) | `AuthService.login` (platformTx) ถือ connection แล้วเรียก `LoginThrottle` (`REQUIRES_NEW`) ที่ต้องใช้ connection ที่ 2 จาก pool เดียวกัน | เรียก throttle นอก transaction หลัก (หรือแยก pool) ทั้ง login / signup / forgot / verify / unlock + test ยิงพร้อมกันเกินขนาด pool | **แก้แล้ว** 2026-10-24: `AuthService.login` / `PlatformAuthService.login` / `AccountService.signup·forgotPassword` คุมลำดับนอก transaction → `ShopLoginTx` / `PlatformLoginTx` / `AccountTx`; billing catch-up ของ login ย้ายออกจาก transaction ของ login (ซ้อนเหมือนกัน); verify / unlock / ผู้อนุมัติ = appTx → platform (ข้าม pool) คงเดิม; `ThrottlePoolIT` (โค้ดเดิมแดงทั้ง 4) — รอรันข้อ 34 ซ้ำ |
+| B5 | 34.7 | login ผิดพร้อมกัน ≥ 10 request ต่อ instance → pool `platform` ติดตาย 30 วิ → 500 + งานอื่นของ pool นั้นค้าง (DoS) | `AuthService.login` (platformTx) ถือ connection แล้วเรียก `LoginThrottle` (`REQUIRES_NEW`) ที่ต้องใช้ connection ที่ 2 จาก pool เดียวกัน | เรียก throttle นอก transaction หลัก (หรือแยก pool) ทั้ง login / signup / forgot / verify / unlock + test ยิงพร้อมกันเกินขนาด pool | **แก้แล้ว** 2026-10-24: `AuthService.login` / `PlatformAuthService.login` / `AccountService.signup·forgotPassword` คุมลำดับนอก transaction → `ShopLoginTx` / `PlatformLoginTx` / `AccountTx`; billing catch-up ของ login ย้ายออกจาก transaction ของ login (ซ้อนเหมือนกัน); verify / unlock / ผู้อนุมัติ = appTx → platform (ข้าม pool) คงเดิม; `ThrottlePoolIT` (โค้ดเดิมแดงทั้ง 4); ข้อ 1 ผ่าน (unit 225 / integration 171), ข้อ 34 รันซ้ำไม่มี 500 + regression ข้อ 0 / 3 / 5 / 31 / 32 ผ่าน |
 | B6 | 34.7 | burst login ผิดพร้อมกันลองรหัสได้ 17–18 ครั้ง (เพดาน 5) | `check()` แล้วค่อย `fail()` (check-then-act) | นับแบบ atomic ก่อนตรวจรหัส (upsert คืนค่า) หรือ advisory lock ต่อ key | รอแก้ |
 
 ### ข้อสังเกต (ตรง spec / mock — รอผู้ใช้ตัดสินว่าจะแก้ spec ไหม)
