@@ -22,7 +22,6 @@ public final class PromotionRules {
   public static final String BRANCH_SCOPE_ADMIN = "โปรที่จำกัดสาขาสร้าง / แก้ได้เฉพาะผู้ดูแลระบบระดับบริษัท";
 
   private static final Scope DEFAULT_SCOPE = new Scope(false, List.of(), List.of());
-  private static final Discount DEFAULT_DISCOUNT = new Discount("percent", 10.0, null);
 
   private PromotionRules() {}
 
@@ -39,8 +38,8 @@ public final class PromotionRules {
 
   /**
    * {@code normalize} ของ mock: ค่าเริ่ม {@code PROMOTION_DEFAULTS} แทน field ที่ไม่ส่ง, code trim + ตัวใหญ่, name trim, endDate '' → null,
-   * bill_discount ใช้ทั้งบิล (scope ทั้งหมด). discount ที่ส่ง null คงเป็น null (โปรของแถมต้องไม่มีส่วนลด) — ค่าเริ่มเฉพาะเมื่อ type ไม่ใช่
-   * free_goods และไม่ได้ส่ง (Java แยก "ไม่ส่ง" กับ null ไม่ได้).
+   * bill_discount ใช้ทั้งบิล (scope ทั้งหมด). discount ไม่เติมค่าเริ่ม (Java แยก "ไม่ส่ง" กับ null ไม่ได้ — E2E B4): ไม่ส่ง / null = ไม่มีส่วนลด
+   * → โปรส่วนลดได้ {@code กรุณากำหนดส่วนลด} (mock: null → ข้อความนี้, ไม่ส่ง → 10% ของ {@code PROMOTION_DEFAULTS}; หน้าบ้านส่ง discount เสมอ).
    */
   public static Promotion normalize(Promotion p) {
     String type = p.type() != null ? p.type() : "item_discount";
@@ -48,13 +47,12 @@ public final class PromotionRules {
         ? new Scope(true, List.of(), List.of())
         : p.scope() == null ? DEFAULT_SCOPE : new Scope(Boolean.TRUE.equals(p.scope().all()), orEmpty(p.scope().productIds()),
             orEmpty(p.scope().categoryIds()));
-    Discount discount = p.discount() != null || "free_goods".equals(type) || p.freeGoods() != null ? p.discount() : DEFAULT_DISCOUNT;
     FreeGoods free = p.freeGoods() == null ? null
         : new FreeGoods(orEmpty(p.freeGoods().items()), Boolean.TRUE.equals(p.freeGoods().repeat()), p.freeGoods().maxSets());
     return new Promotion(null, p.code() == null ? "" : p.code().strip().toUpperCase(Locale.ROOT), p.name() == null ? "" : p.name().strip(),
         p.note() == null ? "" : p.note(), type, p.startDate(), p.endDate() == null || p.endDate().isEmpty() ? null : p.endDate(),
         p.enabled() == null || p.enabled(), p.priority() != null ? p.priority() : 0.0, Boolean.TRUE.equals(p.stackable()), scope,
-        p.minQty() != null ? p.minQty() : 1.0, p.minAmount() != null ? p.minAmount() : 0.0, discount, free, orEmpty(p.branchIds()));
+        p.minQty() != null ? p.minQty() : 1.0, p.minAmount() != null ? p.minAmount() : 0.0, p.discount(), free, orEmpty(p.branchIds()));
   }
 
   /** {@code discountAmount()}: บาทที่ลดจาก {@code base} (ราคาต่อหน่วยของโปรสินค้า / ยอดบิลของโปรท้ายบิล) ไม่เกิน base. */
