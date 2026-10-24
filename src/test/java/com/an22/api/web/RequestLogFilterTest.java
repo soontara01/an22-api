@@ -47,7 +47,7 @@ class RequestLogFilterTest {
             new ApiProperties.Pii(null, null),
             new ApiProperties.Jwt(null, 7),
             new ApiProperties.Log(mode, max),
-            new ApiProperties.App(null, false));
+            new ApiProperties.App(null, false, 0));
     return new RequestLogFilter(props, JSON);
   }
 

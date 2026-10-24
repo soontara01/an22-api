@@ -171,7 +171,7 @@ api รันได้หลาย instance หลัง load balancer โดย
 - **Flyway ตอน start หลาย instance พร้อมกัน**: Flyway ล็อก `flyway_schema_history` เอง (รอกัน ไม่รันซ้ำ); production แนะนำ "ทางที่ 2" (รัน migrate ครั้งเดียวก่อน deploy, แอป `FLYWAY_MIGRATE=false`)
 - **ไฟล์**: ไม่เขียนไฟล์ลง disk ของ instance — export บริษัทตอบเป็น stream ตรง; ถ้าทำเป็น job + ลิงก์ดาวน์โหลดภายหลัง ไฟล์ต้องอยู่ที่ storage กลาง (DB / object storage)
 - **connection**: แอปต่อผ่าน PgBouncer เสมอ (หัวข้อ "PgBouncer") — pool ของ instance (Hikari `DB_POOL_SIZE`) ต่อ PgBouncer, PgBouncer คุมจำนวน connection จริงเข้า PostgreSQL (`default_pool_size` × user ≤ `max_connections`)
-- **ปิดเครื่องนุ่มนวล** (+ drain ตัดสิน 2026-10-24 จาก E2E B7 — ยังไม่ทำ): ได้ SIGTERM → `/readyz` 503 ทันที แต่รับงานต่อ `SHUTDOWN_DRAIN` วิ (ค่าเริ่ม 10, test 0) ให้ lb เลิกส่งงานก่อน แล้วจึง
+- **ปิดเครื่องนุ่มนวล** (+ drain ตัดสิน 2026-10-24 จาก E2E B7 — `ShutdownDrain`): ได้ SIGTERM → `/readyz` 503 ทันที แต่รับงานต่อ `SHUTDOWN_DRAIN` วิ (ค่าเริ่ม 10, test 0) ให้ lb เลิกส่งงานก่อน แล้วจึง
   `server.shutdown=graceful` (รอ request ที่ค้างให้จบ) + health แยก `GET /api/healthz` (liveness, ไม่แตะ DB) / `GET /api/readyz` (readiness, ping DB) ให้ load balancer
 - **log** เป็น JSON ไป stdout (ไม่เขียนไฟล์), มี request id (รับ `X-Request-Id` จาก web ถ้ารูปแบบถูก ไม่งั้นสุ่ม) ไว้ตามข้าม instance — รายละเอียดหัวข้อ "Log ต่อ request"
 - **เวลา** (เปลี่ยน 2026-10-22 ตามผู้ใช้ — เดิม instance ใช้ UTC): container + JVM ใช้เวลาท้องถิ่น **Asia/Bangkok** (`Dockerfile` `TZ`, `Application.main` ตั้ง default เอง ไม่พึ่งเครื่อง)

@@ -36,7 +36,8 @@ scripts/e2e/reset.sh && scripts/e2e/NN-*.sh   # E2E ทีละข้อตา�
 ## Container (production)
 
 `Dockerfile` 2 stage: build ด้วย `eclipse-temurin:25.0.4.1_1-jdk-noble` (`-DskipTests` — test อยู่ที่ `./mvnw verify`) → runtime `…-jre-noble`, layer ของ Boot (`jarmode=tools extract`)
-- user `an22` (uid 10001) ไม่ใช่ root; `java` เป็น PID 1 (exec form) → SIGTERM = graceful shutdown (รอ request ≤ 30 วิ — ตั้ง grace period ของ platform ≥ 40 วิ)
+- user `an22` (uid 10001) ไม่ใช่ root; `java` เป็น PID 1 (exec form) → SIGTERM = drain (`/readyz` 503 แต่ยังรับงาน `SHUTDOWN_DRAIN` วิ, ค่าเริ่ม 10 — `ShutdownDrain`, B7) แล้ว graceful shutdown
+  (รอ request ≤ 30 วิ) — ตั้ง grace period ของ platform ≥ drain + 40 วิ (= 50 วิ; compose `stop_grace_period: 50s`) และ readiness probe ที่ `/readyz` (ไม่มี probe = drain ไม่ช่วย)
 - image มีแค่ `db/migration` (ไม่มี `db/seed`, `.env`, test) — `.dockerignore` แบบ allowlist; ค่าทั้งหมดจาก env ตอนรัน
 - ไม่มี `HEALTHCHECK` (ไม่มี curl ใน image) — ตั้ง probe ที่ platform: liveness `GET /api/healthz`, readiness `GET /api/readyz`
 - `JAVA_TOOL_OPTIONS` = `-XX:MaxRAMPercentage=75 -XX:+ExitOnOutOfMemoryError` + timezone
@@ -59,7 +60,7 @@ src/main/java/com/an22/api/
                  PlanRules, CostVisibility, SubscriptionRules, CategoryRules, Suppliers, PaymentMethodRules, PosTerminalRules, Money, ProductRules,
                  Costing, SerialRules, PriceRules, PromotionRules, TransferRules, PosPricing, PosPayment — ผลตรง golden fixtures ผ่าน FixturesTest,
                  ListLimits, ShiftRules, SaleRules, TaxInvoiceRules, CreditNoteRules, ExchangeRules, AuditRules, SignupRules, CompanyDataRules, PlatformRules)
-  health/        /healthz, /readyz (HealthService ใช้ TransactionTemplate ใน try — `@Transactional` ขอ connection ก่อนเข้า method จับ error ไม่ได้ → 500, B1)
+  health/        /healthz, /readyz, ShutdownDrain (SmartLifecycle ก่อน graceful — B7) (HealthService ใช้ TransactionTemplate ใน try — `@Transactional` ขอ connection ก่อนเข้า method จับ error ไม่ได้ → 500, B1)
   auth/          login / verify / me (AuthController → AuthService → ShopLoginTx / SessionService → SessionDao), LoginThrottle (+ Dao), ShopSession, PasswordResetTokens,
                  signup / forgot-password / reset-password (AccountService → AccountTx → AccountDao, platformTx)
   platform/      /platform/auth/login, /platform/me, /platform/companies/* + /platform/invoices/:id/pay (PlatformCompanyService → PlatformCompanyDao,
@@ -165,7 +166,7 @@ src/test/java/com/an22/api/
 
 `DB_URL` (PgBouncer) · `DB_MIGRATE_URL` (ตรง) · `DB_APP_USER/PASSWORD` · `DB_PLATFORM_USER/PASSWORD` · `DB_OWNER_USER/PASSWORD` (ไม่ต้องเมื่อ `FLYWAY_MIGRATE=false`) ·
 `DB_POOL_SIZE` (10) · `FLYWAY_MIGRATE` (`true` migrate / `false` validate ผ่าน PgBouncer) · `PII_KEYS` · `PII_HASH_KEY` · `JWT_SECRET` (`<kid>:<base64>,…`) · `JWT_TTL_DAYS` (7) ·
-`LOG_BODY` (`off` / `error` / `all`) · `LOG_BODY_MAX` (4096) · `APP_BASE_URL` (ต้นลิงก์ในอีเมล — ไม่ใช้ `Host`) · `JOBS_ENABLED` (`true`; test = `false`) · `JOBS_CRON` (stack ทดสอบเท่านั้น)
+`LOG_BODY` (`off` / `error` / `all`) · `LOG_BODY_MAX` (4096) · `APP_BASE_URL` (ต้นลิงก์ในอีเมล — ไม่ใช้ `Host`) · `JOBS_ENABLED` (`true`; test = `false`) · `JOBS_CRON` (stack ทดสอบเท่านั้น) · `SHUTDOWN_DRAIN` (10 วิ, 0–60; test = 0)
 — ค่าผิด / ไม่ตั้ง → ไม่ start ข้อความบอก**ชื่อตัวแปร ไม่บอกค่า** (`ApiProperties.check()`, `PiiCipher.fromEnv`) — ห้ามใช้ bean validation กับค่าลับ (error ของ binding พิมพ์ค่า)
 
 ## ความปลอดภัย (E48 / E49)

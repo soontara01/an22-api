@@ -17,21 +17,26 @@ public class HealthService {
   static final String NOT_READY = "ระบบยังไม่พร้อม กรุณาลองใหม่";
 
   private final HealthDao dao;
+  private final ShutdownDrain drain;
   private final TransactionTemplate readOnly;
 
   /**
    * ใช้ {@link TransactionTemplate} แทน {@code @Transactional}: ขอ connection ตอนเปิด transaction — ถ้าเป็น annotation ความล้มเหลวเกิดก่อนเข้า method
    * ({@code try} จับไม่ได้ → 500 แทน 503, E2E B1).
    */
-  HealthService(HealthDao dao, PlatformTransactionManager appTx) {
+  HealthService(HealthDao dao, ShutdownDrain drain, PlatformTransactionManager appTx) {
     this.dao = dao;
+    this.drain = drain;
     this.readOnly = new TransactionTemplate(appTx);
     this.readOnly.setReadOnly(true);
     this.readOnly.setTimeout(5);
   }
 
-  /** @throws ApiException 503 เมื่อต่อ DB ไม่ได้ */
+  /** @throws ApiException 503 เมื่อกำลังปิด ({@link ShutdownDrain}) หรือต่อ DB ไม่ได้ */
   public void checkDatabase() {
+    if (drain.draining()) {
+      throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE, NOT_READY);
+    }
     try {
       readOnly.executeWithoutResult(s -> dao.ping());
     } catch (DataAccessException | TransactionException e) {
