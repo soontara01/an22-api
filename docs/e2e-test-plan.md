@@ -783,6 +783,16 @@ cash1 กะเปิดเครื่อง 1 HQ
 | 27.4 | mgr (admin HQ) | เฉพาะเหตุการณ์ branch_id = HQ ไม่เห็นระดับบริษัท / BN | — |
 | 27.5 | ระหว่างรอลบ owner ดู audit-log | 200 | — |
 
+**ผล** 2026-10-24 · commit `c48fe2d` (image เดียวกับข้อ 0) · `scripts/e2e/27-audit-log.sh` · ✅ 68 / ❌ 0
+- เตรียม: std_company (signup / branch_change / user_change 4 / terminal_change 3 / price_change 5) + login 3 + boss ตัดสต็อกที่ HQ / BN → 19 เหตุการณ์วันนี้
+- ✅ 27.1 cash1 → 403 `ดูประวัติการใช้งานได้เฉพาะผู้ดูแลระบบ`; ไม่มีช่วง → `กรุณาเลือกช่วงวันที่ (ไม่เกิน 366 วัน)`; > 366 วัน → `ช่วงวันที่ต้องไม่เกิน 366 วัน`
+- ✅ 27.2 owner (@api2) → ทุกเหตุการณ์ของบริษัทวันนี้ ใหม่สุดก่อน = `dt_audit_log` (id ตรงทุกตัว), ไม่มีของบริษัทอื่น; field action / actorKind / at / branchId / detail / id / ref / terminalId / userId / userName
+- ✅ 27.3 action / userId / branchId / กรองพร้อมกัน 3 ตัว = query ตรง; ค่าแปลก (`nope`, `1.5`, `abc`, `-0.5`, ตัวเลข 5,000 หลัก) → ไม่กรอง ตอบใน ~40 ms ไม่ 500;
+  `<id>e0` / `<id>.0` / `<id>0e-1` = id เดียวกัน, `1e2` = id 100 (แบบ `Number()`)
+- ✅ 27.4 mgr (admin HQ) → เฉพาะเหตุการณ์ branch_id = HQ (ไม่มีระดับบริษัท / BN); ขอ `branchId=BN` → ว่าง
+- ✅ 27.5 owner ขอลบข้อมูล → ดู audit-log ได้ (`deletion_request` 1 แถว), boss → 401 ระหว่างรอลบ; ยกเลิกคำขอคืนแล้ว
+- ✅ ตรวจร่วม: ไม่มี 5xx / ERROR, ไม่มีความลับใน log, ทุก error เป็น `{"message"}`
+
 ### ข้อ 28 — แพ็กเกจ / onboarding
 | case | ทำอะไร | api คาดหวัง | DB คาดหวัง |
 | --- | --- | --- | --- |
