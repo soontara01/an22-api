@@ -439,6 +439,21 @@
 | 14.4 | รับ NB0006 กลับ @21,000 | 200 `fromOtherBranch` [] | แถวเดิม (id เดิม) status in_stock cost 21000 |
 | 14.5 | ตัด NB0007 ออกที่ HQ (status other) แล้วรับ NB0007 ที่ BN | 200 `fromOtherBranch` [{serial NB0007, branchCode HQ}] | แถวเดิม branch_id = BN, status in_stock; HQ NB −1, BN NB +1 |
 
+**ผล** 2026-10-24 · commit `c48fe2d` (image เดียวกับข้อ 0) · `scripts/e2e/14-serial.sh` · ✅ 100 / ❌ 0
+- ✅ 14.1 รับ NB0006 @23,000 และ ` nb0007 ` @20,000 (คนละ call เพราะทุนต่างกัน → movement `receive` 2 แถว serials {NB0006} / {NB0007}) → stock 7, avgCost 20428.5714;
+  serial ตัวใหญ่ ทุนต่อเครื่องถูก, `dt_branch_stock` 7 / 20428.5714, `GET …/serials` in_stock 7
+- ✅ 14.2 (เตรียม NB0003 อยู่ BN, NB0002 ระหว่างโอน) `[]` → `ไม่มี Serial ที่จะรับเข้า`, ว่าง / มีช่องว่าง → `ใช้ได้เฉพาะ A-Z, 0-9 และ -`, `NB0010` + `nb0010` → `ซ้ำในรายการ`,
+  `XX01` → `ต้องขึ้นต้นด้วย NB`, NB0001 → `มีอยู่ในคลังแล้ว`, NB0003 → `อยู่ในคลังสาขา BN`, NB0002 → `อยู่ระหว่างโอน`, หลายตัวผิด → รวมในข้อความเดียว (`รับเข้าไม่ได้ — NB0001: …, XX02: …`),
+  ทุน −1 → `ต้นทุนต้องไม่ติดลบ`, MS → `MS-001 ไม่ได้ควบคุม Serial`; ไม่มี serial / movement ใหม่
+- ✅ 14.3 cash1 → 403 `ตัดสต็อกออกได้เฉพาะผู้ดูแลระบบ`, status `lost` → `ข้อมูลที่ส่งมาไม่ถูกต้อง`, ids ว่าง → `ไม่ได้เลือก Serial`; boss ตัด NB0006 damaged → stock 4,
+  serial damaged + removed_at, movement `issue` −1 ทุน 23,000 (note "ชำรุด/เสียหาย · <note>"), audit `serial_remove` "NB0006 → damaged — จอแตก";
+  ตัดซ้ำ (@api2) / ตัด serial ที่อยู่ BN จาก HQ → `มี Serial ที่ไม่อยู่ในคลังแล้ว กรุณาโหลดใหม่`
+- ✅ 14.4 รับ NB0006 กลับ @21,000 → `fromOtherBranch` [], แถวเดิม (id เดิม) in_stock ทุน 21000, movement note "รับคืนเข้าคลัง"
+- ✅ 14.5 ตัด NB0007 ที่ HQ (other) แล้วรับที่ BN → `fromOtherBranch` [{NB0007, HQ}], แถวเดิมย้าย branch_id = BN in_stock; HQ NB −1 / BN NB +1;
+  stock ของทั้งสองสาขา = จำนวน serial in_stock, avgCost HQ = เฉลี่ยทุนเครื่องในคลังปัด 4 (20250.0000)
+- ✅ ตรวจร่วม: ไม่มี 5xx / ERROR, ไม่มีความลับใน log, ทุก error เป็น `{"message"}`
+- หมายเหตุ (สังเกต ไม่ใช่ bug): note ของ movement ตอนตัด serial ใช้ note ที่ผู้ใช้พิมพ์โดยไม่ตัดช่องว่าง ส่วน audit ตัดช่องว่าง
+
 ### ข้อ 15 — ราคาขาย
 | case | ทำอะไร | api คาดหวัง | DB คาดหวัง |
 | --- | --- | --- | --- |
