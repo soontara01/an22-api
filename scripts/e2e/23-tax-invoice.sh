@@ -137,11 +137,11 @@ check "ชื่อผู้ซื้อถอดรหัสแล้ว" "$NAM
 call GET /tax-invoices
 expect_status 400
 for q in 0105550123451 0-1055-50123-45-1; do
-  call GET "/tax-invoices/buyer?taxId=$q"
+  call POST /tax-invoices/buyer-lookup "{\"taxId\":\"$q\"}"
   expect_status 200
   check "ผู้ซื้อล่าสุดของเลข $q" "$NAME2 0105550123451" "$(jq -r '[.name, .taxId] | join(" ")' <<<"$BODY")"
 done
-call GET "/tax-invoices/buyer?taxId=0994000165510"
+call POST /tax-invoices/buyer-lookup '{"taxId":"0994000165510"}'
 check "เลขที่ไม่เคยใช้ → ว่าง" "200 null" "$STATUS ${BODY:-null}"
 call GET "/sales/$S2/tax-invoice"
 expect_json .invoiceNo "$(inv 4)"

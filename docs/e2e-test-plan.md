@@ -690,7 +690,7 @@ cash1 กะเปิดเครื่อง 1 HQ
 | 23.3 | ออกทีหลัง / ซ้ำ / บิลยกเลิกแล้ว | 200 `INV-…-0002` atSale false / `บิลนี้ออกใบกำกับภาษีเต็มรูปแล้ว (INV-…-0002)` / `ออกใบกำกับภาษีได้เฉพาะบิลขายหน้าร้านที่ชำระแล้ว` | `dt_sales.tax_invoice_no` |
 | 23.4 | reissue: staff / ไม่มีเหตุผล / ถูก | 403 `ยกเลิกและออกใบกำกับภาษีใหม่ได้เฉพาะผู้ดูแลระบบ` / `กรุณาระบุเหตุผลที่ยกเลิกใบเดิม` / 200 `INV-…-0003` | ใบเดิม cancelled_at + replaced_by_no, ใบใหม่ replaces_invoice_no; audit `tax_invoice_reissue` |
 | 23.5 | ร้านไม่จด VAT แล้วขาย → ขอใบกำกับ | `บิลนี้ขายตอนร้านยังไม่ได้จด VAT ออกใบกำกับภาษีไม่ได้` | sale vat_registered false, vat 0 |
-| 23.6 | `GET /tax-invoices` (boss / cash1), `/tax-invoices/buyer?taxId=` (เลขมีขีด / ไม่มีขีด), `/sales/{id}/tax-invoice(s)` | 200 / 403 `ดูรายงานภาษีขายได้เฉพาะผู้ดูแลระบบ` / ผู้ซื้อล่าสุด (ถอดรหัสแล้ว) / ใบปัจจุบัน + ประวัติ | — |
+| 23.6 | `GET /tax-invoices` (boss / cash1), `POST /tax-invoices/buyer-lookup { taxId }` (เลขมีขีด / ไม่มีขีด — เดิม `GET /tax-invoices/buyer?taxId=`, B10), `/sales/{id}/tax-invoice(s)` | 200 / 403 `ดูรายงานภาษีขายได้เฉพาะผู้ดูแลระบบ` / ผู้ซื้อล่าสุด (ถอดรหัสแล้ว) / ใบปัจจุบัน + ประวัติ | — |
 
 **ผล** 2026-10-24 · commit `c48fe2d` (image เดียวกับข้อ 0) · `scripts/e2e/23-tax-invoice.sh` · ✅ 104 / ❌ 0
 - ✅ 23.1 ขายพร้อมผู้ซื้อ (ชื่อมีช่องว่าง, เลข `0-1055-50123-45-1`) → `INV-HQ-<วันนี้>-0001` atSale true issued_at ตั้ง; `buyer_enc` ไม่มีชื่อ / เลขแบบอ่านได้ (ตรวจ byte),
@@ -1167,7 +1167,7 @@ route ร้านที่มี `{id}` ทุกตัวถูกกวาด
 | GET | `/suppliers/{id}` | 10, 6 |
 | PUT | `/suppliers/{id}` | 10, 6 |
 | GET | `/tax-invoices` | 23 |
-| GET | `/tax-invoices/buyer` | 23 |
+| POST | `/tax-invoices/buyer-lookup` (เดิม GET `/tax-invoices/buyer` — B10) | 23, 37 |
 | GET | `/transfers` | 17 |
 | POST | `/transfers` | 17 |
 | GET | `/transfers/{id}` | 17, 6 |
@@ -1195,7 +1195,7 @@ route ร้านที่มี `{id}` ทุกตัวถูกกวาด
 | B7 | 35.1 | `docker stop` (SIGTERM, graceful) ระหว่างมีงานเข้า → บางครั้ง (3 / 5 รอบ) lb ได้ `Connection reset by peer` → 502 × 1 (request ไม่ถูกบันทึก ข้อมูลไม่เสีย) | ไม่มีช่วง drain: Tomcat หยุดรับงานขณะ lb ยังส่ง request ใหม่ | **ตัดสิน 2026-10-24: แก้ใน api (drain)** — เมื่อ SIGTERM `/readyz` ตอบ 503 ทันทีแต่ยังรับงานต่อ `SHUTDOWN_DRAIN` วิ (env ใหม่ ค่าเริ่ม 10, test 0) แล้วค่อย graceful; grace period ของ platform ≥ 50 วิ; IT ตรวจ `/readyz` 503 ระหว่าง drain (nginx ของ stack ทดสอบไม่ probe → E2E ยังอาจเห็น 502) | แก้แล้ว — `ShutdownDrain` (SmartLifecycle phase ก่อน graceful ของ web server) + `SHUTDOWN_DRAIN` (10, test 0), compose `stop_grace_period: 50s` (test `HealthServiceTest`, `ApiPropertiesTest`); E2E ข้อ 35 รันซ้ำตรวจ log drain + `/readyz` 503 ระหว่าง drain — nginx ไม่ probe จึงยังอาจเห็น 502 |
 | B8 | 37.1 | `PUT /products/:id/stock` `unitCost: 1e20` → 500 (`numeric field overflow` ของ `avg_cost numeric(14,4)`) — rollback | กฎไม่จำกัดค่าสูงสุดของเงิน / ทุน แต่คอลัมน์ `numeric(14,x)` จำกัด (กลุ่มเดียวกับ B2) | ErrorHandler แปลง SQLSTATE `22003` (numeric out of range) → 400 `ข้อมูลที่ส่งมาไม่ถูกต้อง` ทุก endpoint (+ test) — ถ้าต้องการข้อความเฉพาะต้องเพิ่มกฎใน spec + mock ก่อน | แก้แล้ว — `ErrorHandler` แปลง SQLSTATE 23514 / 22003 / 22021 → 400 `ข้อมูลที่ส่งมาไม่ถูกต้อง` (test `ErrorHandlerIT`) |
 | B9 | 37.1 | ข้อความมี `\u0000` (เช่นชื่อหมวด) → 500 (`invalid byte sequence for encoding "UTF8": 0x00`) — rollback | PostgreSQL `text` เก็บ NUL ไม่ได้ ไม่มีที่ไหนกรอง | ErrorHandler แปลง SQLSTATE `22021` → 400 `ข้อมูลที่ส่งมาไม่ถูกต้อง` (+ test) หรือปฏิเสธ NUL ตอน parse JSON ทั้งระบบ | แก้แล้ว — `ErrorHandler` แปลง SQLSTATE 23514 / 22003 / 22021 → 400 `ข้อมูลที่ส่งมาไม่ถูกต้อง` (test `ErrorHandlerIT`) |
-| B10 | 37.4 (O3) | `GET /tax-invoices/buyer?taxId=` ส่งเลขผู้เสียภาษีใน URL → an22-web (`redactUrl` ซ่อนแค่ token / code / password) และ proxy / lb ที่ log URL เต็มเก็บเลขนี้ | spec ใช้ query กับข้อมูลส่วนบุคคล | **ตัดสิน 2026-10-24: แก้ spec เป็น `POST /tax-invoices/buyer-lookup` `{ taxId }`** → `TaxInvoiceBuyer \| null` — แก้ api-contract + mock + หน้าบ้าน (pos / sales api service) ใน FrontEnd-An22 commit เดียว แล้วแก้ api (+ test, ลบ GET เดิม) | รอแก้ |
+| B10 | 37.4 (O3) | `GET /tax-invoices/buyer?taxId=` ส่งเลขผู้เสียภาษีใน URL → an22-web (`redactUrl` ซ่อนแค่ token / code / password) และ proxy / lb ที่ log URL เต็มเก็บเลขนี้ | spec ใช้ query กับข้อมูลส่วนบุคคล | **ตัดสิน 2026-10-24: แก้ spec เป็น `POST /tax-invoices/buyer-lookup` `{ taxId }`** → `TaxInvoiceBuyer \| null` — แก้ api-contract + mock + หน้าบ้าน (pos / sales api service) ใน FrontEnd-An22 commit เดียว แล้วแก้ api (+ test, ลบ GET เดิม) | แก้แล้ว — FrontEnd-An22 `9ab079c` (branch `fix/buyer-lookup-post`: api-contract + decisions E50 + mock + service POS / การขาย) และ api `POST /tax-invoices/buyer-lookup` (GET เดิม → 404; test `SaleIT`); script ข้อ 23 / 37 ใช้ POST |
 
 ### ข้อสังเกต (ตรง spec / mock — รอผู้ใช้ตัดสินว่าจะแก้ spec ไหม)
 - O2 (25.5): ใบลดหนี้คืนเงินสดได้เกินเงินในลิ้นชักของกะ (เงินสดคาดติดลบได้) — mock ตรวจ "เงินสดในลิ้นชักไม่พอ" เฉพาะ cash movement ออก

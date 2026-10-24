@@ -264,9 +264,10 @@ class SaleIT extends ApiTest {
     byte[] stored = sql.platform(jdbc -> jdbc.sql("SELECT buyer_enc FROM dt_tax_invoices WHERE tenant_id = :t").param("t", c.id())
         .query(byte[].class).single());
     assertThat(new String(stored, StandardCharsets.UTF_8)).doesNotContain("0105550123451").doesNotContain("ลูกค้า");
-    mvc.perform(as(staff, get("/tax-invoices/buyer").param("taxId", "0105550123451")))
+    mvc.perform(as(staff, post("/tax-invoices/buyer-lookup"), Map.of("taxId", "0105550123451")))
         .andExpect(jsonPath("$.name").value("บริษัท ลูกค้า จำกัด"));
-    mvc.perform(as(staff, get("/tax-invoices/buyer").param("taxId", "0105550123"))).andExpect(content().string(""));
+    mvc.perform(as(staff, post("/tax-invoices/buyer-lookup"), Map.of("taxId", "0105550123"))).andExpect(content().string(""));
+    mvc.perform(as(staff, get("/tax-invoices/buyer").param("taxId", "0105550123451"))).andExpect(status().isNotFound());
 
     Map<String, Object> fixed = Map.of("buyer", Map.of("name", "บริษัท ลูกค้าใหม่ จำกัด", "taxId", "0105550123451", "branchType", "branch",
         "branchNo", "00002", "address", "กรุงเทพฯ"), "reason", " ชื่อผิด ");
@@ -333,6 +334,6 @@ class SaleIT extends ApiTest {
     mvc.perform(as(stranger, post("/sales/" + id + "/tax-invoice"), Map.of("buyer", buyer())).header("X-Branch-Id", other.hq()))
         .andExpect(status().isNotFound());
     mvc.perform(as(stranger, lastYear(get("/sales"))).param("branchId", "all")).andExpect(jsonPath("$.length()").value(0));
-    mvc.perform(as(stranger, get("/tax-invoices/buyer").param("taxId", "0105550123451"))).andExpect(content().string(""));
+    mvc.perform(as(stranger, post("/tax-invoices/buyer-lookup"), Map.of("taxId", "0105550123451"))).andExpect(content().string(""));
   }
 }

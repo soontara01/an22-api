@@ -137,8 +137,11 @@ public class SaleController {
     return invoices.report(s, ctx, from, to, branchId);
   }
 
-  @GetMapping("/tax-invoices/buyer")
-  TaxInvoiceBuyer buyer(ShopSession s, @RequestParam(required = false) String taxId) {
-    return invoices.lastBuyer(s, taxId);
+  /** {@code POST /tax-invoices/buyer-lookup { taxId }} — POST ไม่แก้ข้อมูล: เลขผู้เสียภาษีไม่อยู่ใน URL / log ของ proxy (E50, E2E B10). */
+  record BuyerLookup(String taxId) {}
+
+  @PostMapping("/tax-invoices/buyer-lookup")
+  TaxInvoiceBuyer buyer(ShopSession s, @RequestBody(required = false) BuyerLookup body) {
+    return invoices.lastBuyer(s, body == null ? null : body.taxId());
   }
 }

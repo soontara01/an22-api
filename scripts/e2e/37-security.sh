@@ -84,7 +84,7 @@ probe "query injection (from)" GET "/sales?from=$INJ_Q&to=$today"
 probe "query emoji (branchId)" GET "/sales?$range&branchId=$EMOJI_Q"
 OK200=1 probe "query เลขยาวมาก (userId)" GET "/audit-log?$range&userId=99999999999999999999999999"
 OK200=1 probe "query 1e308 (productId)" GET "/prices?productId=1e308"
-OK200=1 probe "query injection (taxId)" GET "/tax-invoices/buyer?taxId=$INJ_Q"
+OK200=1 probe "body injection (taxId)" POST /tax-invoices/buyer-lookup "$(jq -nc --arg s "$INJ" '{taxId:$s}')"
 probe "query ซ้ำ (from 2 ค่า)" GET "/sales?from=$today&from=2020-01-01&to=$today"
 probe "body ไม่ใช่ JSON" POST /categories '{"code":'
 probe "body array แทน object" POST /categories '[{"code":"X1","name":"x"}]'
@@ -134,7 +134,7 @@ GETS=(/me /branches "/branches/$BR_HQ" /categories /suppliers "/suppliers/$SUP" 
   /products "/products/$PID" "/products/$PID/movements?$range" "/products/$PID/branch-stock" "/products/$P_NB/serials" "/prices?productId=$PID" /promotions "/promotions/$PRO"
   "/transfers?$range" "/transfers/$TR" /shifts/current "/shifts?$range" /shifts/last-float "/shifts/variance-report?$range" "/shifts/$SHIFT" "/shifts/$SHIFT/summary"
   "/shifts/$SHIFT/movements" "/shifts/$SHIFT/drawer-opens" "/shifts/$SHIFT/adjustments" "/sales?$range" "/sales/$SALE" "/sales/$SALE/tax-invoice"
-  "/sales/$SALE/tax-invoices" "/sales/$SALE/credit-notes" "/sales/$SALE/exchanges" "/credit-notes?$range" "/tax-invoices?$range" "/tax-invoices/buyer?taxId=0105550123451"
+  "/sales/$SALE/tax-invoices" "/sales/$SALE/credit-notes" "/sales/$SALE/exchanges" "/credit-notes?$range" "/tax-invoices?$range"
   /pos/held-bills "/audit-log?$range" /settings/store /settings/company /settings/branch /settings/menu-access /company/subscription /company/onboarding
   /healthz /readyz)
 before=$(snapshot)
@@ -204,6 +204,7 @@ for via in @lb @api1; do
 done
 
 case_id 37.4 "ค้นความลับใน log ทุก container ตั้งแต่ stack เริ่ม"
+as "$T_BOSS"; call POST /tax-invoices/buyer-lookup '{"taxId":"0105550123451"}'; as -   # ให้มีคำขอค้นผู้ซื้อใน log ของ lb / api
 ALL="$E2E_WORK/all.log"
 for svc in api1 api2 lb pgbouncer db; do docker logs "an22-multi-$svc-1" >>"$ALL" 2>&1; done
 echo "     log ทั้งหมด $(grep -c . "$ALL") บรรทัด (api1 / api2 / lb / pgbouncer / db ตั้งแต่ $(docker inspect -f '{{.Created}}' an22-multi-api1-1 | cut -c1-19)Z)"
@@ -220,9 +221,8 @@ for s in owner1234 pass1234 newpass96 newowner325 e2e-Secret-Pw-29 '"password":"
   "$BUYER" ที่อยู่ลับสามสิบเจ็ด ผู้ซื้อลับ ลูกค้าลับ ลับเฉพาะ ที่อยู่ลับ; do
   check "ไม่มี $s" 0 "$(leak "$s")"
 done
-# เลขผู้เสียภาษี: api mask query (taxId=***) — nginx ของ stack ทดสอบ log URL เต็ม (O3) จึงค้นเฉพาะ log ของ api / pgbouncer / db
-check "ไม่มีเลขผู้เสียภาษี 0105550123451 ใน log ของ api" 0 "$(grep -vE '^[0-9.]+ - - \[' "$ALL" | grep -cF 0105550123451 || true)"
-check "nginx (lb ทดสอบ) log ?taxId= เต็ม — ข้อสังเกต O3" yes "$(grep -E '^[0-9.]+ - - \[' "$ALL" | grep -qF 'buyer?taxId=0105550123451' && echo yes || echo no)"
+# เลขผู้เสียภาษี: ค้นผู้ซื้อเป็น POST (B10 / E50) — ไม่มีใน URL ของ lb / api
+check "ไม่มีเลขผู้เสียภาษี 0105550123451 ใน log ทุก container" 0 "$(grep -cF 0105550123451 "$ALL" || true)"
 check "body ที่ log แล้ว mask ช่องอ่อนไหว (มี \"***\")" yes "$(grep -q '"\*\*\*"' "$ALL" && echo yes || echo no)"
 
 # 37.3: 500 × 2 (api1 + api2) + bug ที่รู้แล้วใน 37.1 (B8 unitCost 1e20, B9 NUL) × 2 — access ERROR + unhandled ERROR ต่อ request
