@@ -2,9 +2,13 @@ package com.an22.api.rules;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.an22.api.model.Branch;
 import com.an22.api.model.BranchPayload;
+import com.an22.api.model.CompanyInfo;
 import com.an22.api.model.SignupPayload;
+import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 
 /** ตาม {@code signup.model.spec.ts}, {@code company-data.model.spec.ts} และ {@code parseAuditQuery} ของ {@code audit.model.spec.ts}. */
@@ -79,5 +83,30 @@ class SignupAndAuditRulesTest {
       assertThat(AuditRules.parseAuditQuery(null, null, null, odd, null).userId()).as(odd).isNull();
     }
     assertThat(AuditRules.parseAuditQuery(null, null, null, "9007199254740991", null).userId()).isEqualTo(9_007_199_254_740_991L);
+  }
+
+  @Test
+  void auditDetailsReadLikeTheFrontEnd() {
+    // ตาม "audit details (C3-5)" ของ audit.model.spec.ts
+    assertThat(AuditRules.auditBaht(BigDecimal.valueOf(1490))).isEqualTo("฿1,490");
+    assertThat(AuditRules.auditBaht(new BigDecimal("50.00"))).isEqualTo("฿50");
+    List<Branch> branches = List.of(branch(1, "HQ"), branch(3, "BN"));
+    assertThat(AuditRules.auditBranchCodes(List.of(3L, 1L), branches)).isEqualTo("BN, HQ");
+    assertThat(AuditRules.auditBranchCodes(List.of(9L), branches)).isEqualTo("#9");
+
+    CompanyInfo before = CompanyRules.COMPANY_INFO_DEFAULTS;
+    CompanyInfo seeCost = new CompanyInfo(before.name(), before.taxId(), before.vatRegistered(), before.taxInvoicePaper(),
+        before.exchangeDays(), new BigDecimal("5.00"), before.requireShift(), before.shiftVarianceLimit(), before.shiftMaxHours(), true);
+    assertThat(AuditRules.companySettingsChanges(before, seeCost)).isEqualTo("ผู้ใช้ทั่วไปเห็นทุน / กำไร: ปิด → เปิด");
+    CompanyInfo more = new CompanyInfo(before.name(), before.taxId(), false, "80mm", BigDecimal.ZERO,
+        before.manualDiscountMaxPercent(), before.requireShift(), BigDecimal.valueOf(1500), before.shiftMaxHours(), before.staffSeeCost());
+    assertThat(AuditRules.companySettingsChanges(before, more)).isEqualTo(
+        "จด VAT: จด → ไม่จด · กระดาษใบกำกับภาษี: A4 → 80 มม. · เปลี่ยนสินค้าได้ภายใน: 7 วัน → ไม่จำกัด"
+            + " · ส่วนต่างที่ต้องให้ admin อนุมัติ: ฿100 → ฿1,500");
+    assertThat(AuditRules.companySettingsChanges(before, before)).isEqualTo("บันทึกโดยไม่มีการเปลี่ยนแปลง");
+  }
+
+  private static Branch branch(long id, String code) {
+    return new Branch(id, code, code, "00000", "", "", "", true);
   }
 }

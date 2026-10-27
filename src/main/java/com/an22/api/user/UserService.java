@@ -8,6 +8,7 @@ import com.an22.api.company.PlanLimits;
 import com.an22.api.db.TenantLocks;
 import com.an22.api.model.User;
 import com.an22.api.model.UserPayload;
+import com.an22.api.rules.AuditRules;
 import com.an22.api.rules.PlanRules.LimitKind;
 import com.an22.api.rules.UserRules;
 import com.an22.api.rules.UserRules.Rights;
@@ -15,7 +16,6 @@ import com.an22.api.web.ApiException;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
-import java.util.stream.Collectors;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -181,7 +181,7 @@ public class UserService {
 
   private void record(ShopSession s, User u, String verb) {
     String rights = ROLE_LABEL.get(u.role()) + " · "
-        + (u.allBranches() ? "ทุกสาขา" : "สาขา " + u.branchIds().stream().map(String::valueOf).collect(Collectors.joining(", ")))
+        + (u.allBranches() ? "ทุกสาขา" : "สาขา " + AuditRules.auditBranchCodes(u.branchIds(), branches.list()))
         + (u.active() ? "" : " · ปิดใช้งาน");
     audit.record(s, "user_change", null, "user", u.id(), u.username(), verb + "ผู้ใช้ — " + rights);
   }

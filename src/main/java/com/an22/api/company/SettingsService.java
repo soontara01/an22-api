@@ -8,6 +8,7 @@ import com.an22.api.model.BranchPayload;
 import com.an22.api.model.CompanyInfo;
 import com.an22.api.model.MenuAccess;
 import com.an22.api.model.StoreInfo;
+import com.an22.api.rules.AuditRules;
 import com.an22.api.rules.CompanyRules;
 import com.an22.api.db.TenantLocks;
 import com.an22.api.rules.ShiftRules;
@@ -58,9 +59,11 @@ public class SettingsService {
     if (problem != null) {
       throw ApiException.badRequest(problem);
     }
+    CompanyInfo before = company.get();
     company.update(info);
-    recordCompanySettings(s, info);
-    return company.get();
+    CompanyInfo after = company.get();
+    recordCompanySettings(s, before, after);
+    return after;
   }
 
   /**
@@ -93,6 +96,7 @@ public class SettingsService {
       throw ApiException.badRequest(problem);
     }
     CompanyInfo info = CompanyRules.companyInfoOf(payload);
+    CompanyInfo before = company.get();
     company.update(info);
     Branch branch = requestBranch(ctx);
     BranchPayload details =
@@ -100,8 +104,9 @@ public class SettingsService {
             branch.code(), payload.placeName().isEmpty() ? branch.name() : payload.placeName(), branch.branchNo(),
             payload.address(), payload.phone(), payload.receiptFooter(), branch.active());
     Branch saved = branches.update(branch.id(), details);
-    recordCompanySettings(s, info);
-    return CompanyRules.storeInfoOf(company.get(), saved);
+    CompanyInfo after = company.get();
+    recordCompanySettings(s, before, after);
+    return CompanyRules.storeInfoOf(after, saved);
   }
 
   /** {@code requireShiftProblem()} ของ mock: ปิดระบบกะขณะมีกะเปิดไม่ได้ — ล็อก "shifts" กันเปิดกะพร้อมกัน. */
@@ -170,9 +175,8 @@ public class SettingsService {
     return branches.first().orElseThrow(() -> ApiException.notFound(BRANCH_NOT_FOUND));
   }
 
-  private void recordCompanySettings(ShopSession s, CompanyInfo info) {
+  private void recordCompanySettings(ShopSession s, CompanyInfo before, CompanyInfo after) {
     audit.record(s, "company_settings", null, "company", s.tenantId(), s.companyCode(),
-        "VAT " + (info.vatRegistered() ? "จด" : "ไม่จด") + " · ระบบกะ " + (info.requireShift() ? "เปิด" : "ปิด")
-            + " · ส่วนลดพนักงานสูงสุด " + info.manualDiscountMaxPercent().stripTrailingZeros().toPlainString() + "%");
+        AuditRules.companySettingsChanges(before, after));
   }
 }
