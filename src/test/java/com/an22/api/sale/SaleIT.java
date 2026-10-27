@@ -244,7 +244,7 @@ class SaleIT extends ApiTest {
     mvc.perform(as(owner, get("/sales/" + id + "/tax-invoice")))
         .andExpect(jsonPath("$.cancelReason").value("ยกเลิกบิล: ลูกค้าเปลี่ยนใจ")).andExpect(jsonPath("$.cancelledAt").isNotEmpty());
     mvc.perform(at(1, as(owner, post("/sales/" + id + "/void"), Map.of("reason", "x")))).andExpect(content().json(message("ยกเลิกได้เฉพาะบิลที่ชำระแล้ว"), true));
-    assertThat(companies.audit(c, "sale_void")).containsExactly("sale_void|POS-HQ-1-" + day + "-0001|฿25214 — ลูกค้าเปลี่ยนใจ (อนุมัติโดย boss)");
+    assertThat(companies.audit(c, "sale_void")).containsExactly("sale_void|POS-HQ-1-" + day + "-0001|฿25,214 — ลูกค้าเปลี่ยนใจ (อนุมัติโดย boss)");
     // ยอดระบบของกะ: ขายแล้วยกเลิกในกะเดียวกัน = 0
     mvc.perform(as(owner, get("/shifts/" + shift + "/summary"))).andExpect(jsonPath("$.lines[0].expected").value(1000.0))
         .andExpect(jsonPath("$.voidCount").value(1));

@@ -8,9 +8,11 @@ import com.an22.api.auth.ShopSession;
 import com.an22.api.model.BillingInvoice;
 import com.an22.api.model.OnboardingCounts;
 import com.an22.api.model.SubscriptionInfo;
+import com.an22.api.rules.AuditRules;
 import com.an22.api.rules.PlanRules;
 import com.an22.api.rules.SubscriptionRules;
 import com.an22.api.web.ApiException;
+import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.LocalDate;
 import java.util.Comparator;
@@ -52,7 +54,7 @@ public class SubscriptionService {
         .orElseThrow(() -> ApiException.badRequest("ไม่มีแพ็กเกจนี้"));
     accounts.setPlan(s.tenantId(), plan.id());
     audit.recordOnPlatform(s, "plan_change", null, "company", s.tenantId(), s.companyCode(),
-        "เปลี่ยนเป็นแพ็กเกจ " + plan.name() + " (฿" + plan.monthlyPrice() + " / เดือน)");
+        "เปลี่ยนเป็นแพ็กเกจ " + plan.name() + " (" + AuditRules.auditBaht(BigDecimal.valueOf(plan.monthlyPrice())) + " / เดือน)");
     CompanyRow c = sessions.company(Via.PLATFORM, s.tenantId()).orElseThrow();
     return info(c, accounts.usageOnPlatform(s.tenantId()), sessions.invoices(Via.PLATFORM, s.tenantId()));
   }

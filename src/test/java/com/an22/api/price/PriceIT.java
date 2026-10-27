@@ -94,8 +94,8 @@ class PriceIT extends ApiTest {
 
     mvc.perform(as(owner, delete("/prices/" + second))).andExpect(status().isOk());
     assertThat(companies.audit(c, "price_change")).containsExactly(
-        "price_change|P1 ฿1234.5|เพิ่มช่วงราคา 2020-01-01 – ไม่มีกำหนด",
-        "price_change|P1 ฿1234.5|แก้ช่วงราคา 2020-01-01 – " + yesterday,
+        "price_change|P1 ฿1,234.5|เพิ่มช่วงราคา 2020-01-01 – ไม่มีกำหนด",
+        "price_change|P1 ฿1,234.5|แก้ช่วงราคา 2020-01-01 – " + yesterday,
         "price_change|P1 ฿990|เพิ่มช่วงราคา " + today + " – ไม่มีกำหนด",
         "price_change|P1 ฿990 ตั้งแต่ " + today + "|ลบช่วงราคา");
   }

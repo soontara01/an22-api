@@ -25,12 +25,12 @@ import com.an22.api.pos.PosTerminalDao;
 import com.an22.api.price.PriceDao;
 import com.an22.api.product.ProductDao;
 import com.an22.api.promotion.PromotionDao;
+import com.an22.api.rules.AuditRules;
 import com.an22.api.rules.ListLimits;
 import com.an22.api.rules.Money;
 import com.an22.api.rules.PosPayment;
 import com.an22.api.rules.PosPricing;
 import com.an22.api.rules.PosTerminalRules;
-import com.an22.api.rules.PriceRules;
 import com.an22.api.rules.SaleRules;
 import com.an22.api.rules.ShiftRules;
 import com.an22.api.rules.TaxInvoiceRules;
@@ -175,7 +175,7 @@ public class SaleService {
       sale = dao.find(id).orElseThrow();
     }
     if (manual) {
-      audit.record(s, "manual_discount", branch, "sale", id, orderNo, "฿" + PriceRules.jsNumber(sale.manualDiscount()) + " — "
+      audit.record(s, "manual_discount", branch, "sale", id, orderNo, AuditRules.auditBaht(sale.manualDiscount()) + " — "
           + sale.manualDiscountReason());
     }
     return sale;
@@ -266,7 +266,7 @@ public class SaleService {
     dao.voided(id, reason, voidShiftId, s.user().name(), approver);
     invoices.cancelForVoid(id, reason);
     audit.record(s, "sale_void", sale.branchId(), "sale", id, sale.orderNo(),
-        "฿" + PriceRules.jsNumber(sale.total()) + " — " + reason + (approver != null ? " (อนุมัติโดย " + approver + ")" : ""));
+        AuditRules.auditBaht(sale.total()) + " — " + reason + (approver != null ? " (อนุมัติโดย " + approver + ")" : ""));
     return dao.find(id).orElseThrow();
   }
 

@@ -144,7 +144,7 @@ class CreditNoteIT extends ApiTest {
     mvc.perform(at(as(owner, get("/credit-notes")))).andExpect(content().json(message("กรุณาเลือกช่วงวันที่ (ไม่เกิน 366 วัน)"), true));
     assertThat(companies.audit(c, "credit_note")).containsExactly(
         "credit_note|CN-HQ-" + day + "-0001|บิล " + orderNo(sale) + " คืนเงิน ฿107",
-        "credit_note|CN-HQ-" + day + "-0002|บิล " + orderNo(sale) + " คืนเงิน ฿25214");
+        "credit_note|CN-HQ-" + day + "-0002|บิล " + orderNo(sale) + " คืนเงิน ฿25,214");
   }
 
   private String orderNo(long sale) throws Exception {

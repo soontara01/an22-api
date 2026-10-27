@@ -16,10 +16,10 @@ import com.an22.api.model.TaxInvoiceBuyer;
 import com.an22.api.pos.PosTerminalDao;
 import com.an22.api.product.ProductDao;
 import com.an22.api.promotion.PromotionDao;
+import com.an22.api.rules.AuditRules;
 import com.an22.api.rules.CompanyRules;
 import com.an22.api.rules.CreditNoteRules;
 import com.an22.api.rules.ListLimits;
-import com.an22.api.rules.PriceRules;
 import com.an22.api.security.PiiCipher;
 import com.an22.api.shift.ShiftDao;
 import com.an22.api.web.ApiException;
@@ -154,7 +154,7 @@ public class CreditNoteService {
         device.map(t -> t.posId() == null ? "" : t.posId()).orElse(""), sale.vatRegistered());
     long id = dao.insert(created, buyer == null ? null : cipher.encryptString(json.writeValueAsString(buyer), aad(s)));
     audit.record(s, "credit_note", sale.branchId(), "credit_note", id, cnNo,
-        "บิล " + sale.orderNo() + " คืนเงิน ฿" + PriceRules.jsNumber(draft.total()));
+        "บิล " + sale.orderNo() + " คืนเงิน " + AuditRules.auditBaht(draft.total()));
     return decode(s, List.of(dao.find(id).orElseThrow())).getFirst();
   }
 

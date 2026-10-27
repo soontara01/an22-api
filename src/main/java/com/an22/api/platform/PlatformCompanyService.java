@@ -6,10 +6,10 @@ import com.an22.api.model.BillingInvoice;
 import com.an22.api.model.PlatformAdmin;
 import com.an22.api.model.PlatformCompany;
 import com.an22.api.platform.PlatformCompanyDao.CompanyRecord;
+import com.an22.api.rules.AuditRules;
 import com.an22.api.rules.CompanyDataRules;
 import com.an22.api.rules.PlanRules;
 import com.an22.api.rules.PlatformRules;
-import com.an22.api.rules.PriceRules;
 import com.an22.api.rules.SubscriptionRules;
 import com.an22.api.rules.UserRules;
 import com.an22.api.web.ApiException;
@@ -129,7 +129,7 @@ public class PlatformCompanyService {
     if ("overdue".equals(c.suspendedReason()) && status != SubscriptionRules.Status.SUSPENDED) {
       dao.setStatus(c.id(), true, null, null);
     }
-    record(admin, c, "invoice_paid", "company", c.id(), invoice.invoiceNo(), "฿" + PriceRules.jsNumber(invoice.amount().doubleValue()));
+    record(admin, c, "invoice_paid", "company", c.id(), invoice.invoiceNo(), AuditRules.auditBaht(invoice.amount()));
     return detail(c.id());
   }
 

@@ -85,7 +85,10 @@ class SettingsIT extends ApiTest {
     mvc.perform(as(staff, get("/me"))).andExpect(jsonPath("$.canSeeCost").value(true))
         .andExpect(jsonPath("$.company.name").value("ร้านใหม่"));
     assertThat(companies.audit(c, "company_settings"))
-        .containsExactly("company_settings|" + c.code() + "|VAT จด · ระบบกะ ปิด · ส่วนลดพนักงานสูงสุด 2.5%");
+        .containsExactly("company_settings|" + c.code() + "|ชื่อผู้ประกอบการ: บริษัท " + c.code() + " → ร้านใหม่"
+            + " · เลขประจำตัวผู้เสียภาษี: - → 0105550123451 · กระดาษใบกำกับภาษี: A4 → 80 มม. · เปลี่ยนสินค้าได้ภายใน: 7 วัน → 3 วัน"
+            + " · ส่วนลดพิเศษที่พนักงานให้ได้สูงสุด: 5% → 2.5% · ใช้ระบบกะ: เปิด → ปิด · ส่วนต่างที่ต้องให้ admin อนุมัติ: ฿100 → ฿50"
+            + " · เตือนเมื่อกะเปิดนานเกิน: 12 ชม. → 10 ชม. · ผู้ใช้ทั่วไปเห็นทุน / กำไร: ปิด → เปิด"); // เฉพาะค่าที่เปลี่ยน (C3-5)
   }
 
   @Test

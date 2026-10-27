@@ -5,6 +5,7 @@ import com.an22.api.auth.ShopSession;
 import com.an22.api.db.TenantLocks;
 import com.an22.api.model.SkuPrice;
 import com.an22.api.product.ProductDao;
+import com.an22.api.rules.AuditRules;
 import com.an22.api.rules.PriceRules;
 import com.an22.api.web.ApiException;
 import java.time.Clock;
@@ -63,7 +64,7 @@ public class PriceService {
     SkuPrice p = dao.find(id).orElseThrow(() -> ApiException.notFound(NOT_FOUND));
     dao.delete(id);
     audit.record(s, "price_change", null, "price", id,
-        sku(p.productId()) + " ฿" + PriceRules.jsNumber(p.price()) + " ตั้งแต่ " + p.startDate(), "ลบช่วงราคา");
+        sku(p.productId()) + " " + AuditRules.auditBaht(p.price()) + " ตั้งแต่ " + p.startDate(), "ลบช่วงราคา");
   }
 
   /** {@code validate} ของ mock: SKU ต้องมีจริง แล้ว {@link PriceRules#priceError}; endDate '' → null, note ไม่ส่ง → ''. */
@@ -81,7 +82,7 @@ public class PriceService {
 
   private SkuPrice saved(ShopSession s, long id, String verb) {
     SkuPrice p = dao.find(id).orElseThrow();
-    audit.record(s, "price_change", null, "price", id, sku(p.productId()) + " ฿" + PriceRules.jsNumber(p.price()),
+    audit.record(s, "price_change", null, "price", id, sku(p.productId()) + " " + AuditRules.auditBaht(p.price()),
         verb + "ช่วงราคา " + p.startDate() + " – " + (p.endDate() != null ? p.endDate() : "ไม่มีกำหนด"));
     return p;
   }

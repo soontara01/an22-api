@@ -69,7 +69,7 @@ class UserIT extends ApiTest {
         .andExpect(jsonPath("$.password").doesNotExist());
     login(c.code(), "new.user", "pass1");
     assertThat(companies.audit(c, "user_change"))
-        .containsExactly("user_change|new.user|เพิ่มผู้ใช้ — ผู้ใช้ทั่วไป · สาขา " + c.hq() + ", " + c.bn());
+        .containsExactly("user_change|new.user|เพิ่มผู้ใช้ — ผู้ใช้ทั่วไป · สาขา HQ, BN"); // รหัสสาขา ไม่ใช่ id (C3-5)
   }
 
   @Test
