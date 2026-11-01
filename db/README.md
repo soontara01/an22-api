@@ -19,6 +19,8 @@ db/
 
 ## ติดตั้ง server ใหม่
 
+ทำทีละขั้นพร้อมคำสั่ง / ผลที่ควรเห็น / ผู้ดูแลแพลตฟอร์มคนแรก: [`docs/db-init.md`](../docs/db-init.md) — หัวข้อนี้เป็นสรุป
+
 1. **roles** — ต่อ database `postgres` ด้วย admin (Azure: server admin ที่ตั้งตอนสร้าง server — ไม่ใช่ superuser ก็พอ: ต้องมี `CREATEDB` `CREATEROLE` `BYPASSRLS`)
 
    ```sh
