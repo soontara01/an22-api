@@ -99,7 +99,7 @@ migration ไม่สร้างผู้ใช้ใด ๆ — ผู้ด�
 
 ```sh
 env_get() { grep -m1 "^$1=" .env | cut -d= -f2-; }
-OWNER_URL='postgresql://an22_owner@<host>:5432/an22'
+OWNER_URL='postgresql://an22_owner@<host>:5432/an22'    # ← แก้ <host> เป็น host จริง (เครื่องตัวเอง: localhost)
 # Azure: OWNER_URL='postgresql://an22_owner@<server>.postgres.database.azure.com:5432/an22?sslmode=verify-full&sslrootcert=/secure/azure-ca.pem'
 CA=$(env_get DB_CA_FILE); NET=$(env_get DB_APPLY_NETWORK)
 psql_owner() {
@@ -119,11 +119,12 @@ echo "$HASH" | cut -c1-7      # ต้องได้ $2y$10$
 **4.2 ใส่แถว** (`username`: `a-z 0-9 . _ -` ยาว 3–30; `created_*` / `updated_*` trigger ใส่ให้เอง — actor `system`):
 
 ```sh
-psql_owner -q -v hash="$HASH" <<'SQL'
+psql_owner -q -v hash="$HASH" <<'SQL' && unset HASH
 INSERT INTO dt_platform_admins (username, name, password_hash) VALUES ('platform', 'ผู้ดูแลแพลตฟอร์ม', :'hash');
 SQL
-unset HASH
 ```
+
+ไม่มีข้อความ = ผ่าน; ล้ม (เช่น `could not translate host name "<host>"` = ยังไม่ได้แก้ `OWNER_URL`) → แก้แล้วรัน 4.2 ซ้ำได้เลย (`HASH` ยังอยู่)
 
 เปลี่ยนรหัสภายหลัง: ทำ 4.1 ใหม่ แล้ว `UPDATE dt_platform_admins SET password_hash = :'hash' WHERE username = 'platform';` แบบเดียวกับ 4.2
 
