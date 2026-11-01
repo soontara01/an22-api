@@ -30,7 +30,7 @@ call PUT /settings/company "$(company_body '.taxInvoicePaper = "80mm" | .exchang
 expect_status 200
 expect_json '[.taxInvoicePaper, .exchangeDays, .staffSeeCost] | map(tostring) | join(" ")' "80mm 10 true"
 check "dt_company_info" "บริษัท ทดสอบ $CODE:0105550123451:true:80mm:10:5.00:true:100.00:12:true" "$(info_row)"
-check "audit company_settings" "company_settings:$U_BOSS:-:VAT จด · ระบบกะ เปิด · ส่วนลดพนักงานสูงสุด 5%" "$(audit_last company_settings)"
+check "audit company_settings" "company_settings:$U_BOSS:-:กระดาษใบกำกับภาษี: A4 → 80 มม. · เปลี่ยนสินค้าได้ภายใน: 7 วัน → 10 วัน · ผู้ใช้ทั่วไปเห็นทุน / กำไร: ปิด → เปิด" "$(audit_last company_settings)"
 call PUT /settings/company "$(company_body)"
 expect_status 200
 
@@ -71,7 +71,7 @@ branch -; terminal -
 call PUT /settings/company "$(company_body '.requireShift = false')"
 expect_status 200
 expect_sql "SELECT require_shift FROM dt_company_info WHERE tenant_id = $TENANT" f
-check "audit company_settings (ระบบกะ ปิด)" "company_settings:$U_BOSS:-:VAT จด · ระบบกะ ปิด · ส่วนลดพนักงานสูงสุด 5%" "$(audit_last company_settings)"
+check "audit company_settings (ระบบกะ ปิด)" "company_settings:$U_BOSS:-:ใช้ระบบกะ: เปิด → ปิด" "$(audit_last company_settings)"
 call PUT /settings/company "$(company_body)"
 expect_status 200
 

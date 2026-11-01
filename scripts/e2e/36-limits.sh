@@ -76,7 +76,9 @@ for via in @api1 @api2; do
   timed $via GET "/sales?from=$(TZ=Asia/Bangkok date +%F)&to=$(TZ=Asia/Bangkok date +%F)"
   expect_status 503
   expect_msg "ระบบใช้เวลานานเกินไป กรุณาลองใหม่หรือลดช่วงข้อมูล"
-  check "$via รอ ~3 วิ (${MS} ms)" yes "$([[ $MS -ge 2800 && $MS -le 6000 ]] && echo yes || echo no)"
+  # ขอบล่าง 2 วิ: api1 / api2 อาจได้ backend เดียวกันผ่าน PgBouncer (transaction pooling) — เคยเห็น PG ยกเลิกตัวที่สอง 3.09 วิหลังตัวแรก
+  # (นับก่อน request ของ api2 มาถึง → 2,440 ms); ไม่มี timeout จะได้ 503 ทันที
+  check "$via รอ ~3 วิ (${MS} ms)" yes "$([[ $MS -ge 2000 && $MS -le 6000 ]] && echo yes || echo no)"
 done
 call GET "/products"
 expect_status 200   # endpoint ที่ไม่แตะ dt_sales ปกติระหว่างล็อก

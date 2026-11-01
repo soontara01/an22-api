@@ -64,7 +64,8 @@ L1=$(docker logs --since "$STOP_FROM" an22-multi-api1-1 2>&1)
 echo "     /readyz ของ api1 ระหว่าง stop: $(uniq -c "$E2E_WORK/ready1" | awk '{printf "%s×%s ", $2, $1}')"
 check "drain: /readyz 503 ระหว่าง stop (B7)" yes "$(grep -qx 503 "$E2E_WORK/ready1" && echo yes || echo no)"
 check "drain: log ก่อน graceful (B7)" yes "$(grep -q 'shutdown: /readyz 503' <<<"$L1" && echo yes || echo no)"
-check "stop ใช้ ≥ SHUTDOWN_DRAIN (10 วิ) และไม่ถูก kill" yes "$([[ $((ACTION_DONE - ACTION_AT)) -ge 10000 ]] && echo yes || echo no)"
+# เวลาวัดจากฝั่ง shell ได้ 10,002–10,700 ms (บางรอบต่ำกว่า 10,000 เล็กน้อย) — เผื่อ 500 ms; ไม่มี drain จะหยุดใน ~2 วิ, ถูก kill = exit 137 (ตรวจข้างบน)
+check "stop ใช้ ≥ SHUTDOWN_DRAIN (10 วิ, เผื่อ 0.5 วิ)" yes "$([[ $((ACTION_DONE - ACTION_AT)) -ge 9500 ]] && echo yes || echo no)"
 check "api1 graceful shutdown (log)" yes "$(grep -q 'Commencing graceful shutdown' <<<"$L1" && grep -q 'Graceful shutdown complete' <<<"$L1" && echo yes || echo no)"
 inflight=$(grep '"type":"access"' <<<"$L1" | jq -r 'select(.path == "/api/sales") | .status' | sort | uniq -c | tr -s ' ' | tr '\n' ';')
 echo "     api1 access log หลังสั่ง stop: $inflight"
@@ -103,6 +104,7 @@ as -
 
 case_id 35.3 "start ใหม่ทั้งสองตัว"
 # docker logs เก็บ log ข้าม start / restart ของ container เดิม — ไม่ต้อง save_logs (ซ้ำ)
+START_FROM=$(now_utc)
 docker start an22-multi-api2-1 >/dev/null
 docker restart an22-multi-api1-1 >/dev/null
 for url in "$API1" "$API2" "$LB"; do for _ in $(seq 1 120); do ready "$url" && break; sleep 1; done; done
@@ -110,8 +112,10 @@ for base in "$API1" "$API2" "$LB"; do
   check "$base/readyz" 200 "$(curl -s -o /dev/null -w '%{http_code}' "$base/readyz")"
 done
 for svc in api1 api2; do
-  check "$svc flyway validate ผ่านหลัง start (log ล่าสุด)" yes \
-    "$(docker logs --tail 400 "an22-multi-$svc-1" 2>&1 | grep -q 'flyway validate: ผ่าน (FLYWAY_MIGRATE=false)' && echo yes || echo no)"
+  # เก็บ log ก่อนค่อย grep — `docker logs | grep -q` + pipefail: grep เจอแล้วออก, docker logs โดน SIGPIPE → ได้ no ทั้งที่มีบรรทัดนั้น
+  L=$(docker logs --since "$START_FROM" "an22-multi-$svc-1" 2>&1)
+  check "$svc flyway validate ผ่านหลัง start (log ตั้งแต่ start)" yes \
+    "$(grep -q 'flyway validate: ผ่าน (FLYWAY_MIGRATE=false)' <<<"$L" && echo yes || echo no)"
 done
 as "$T_CASH1"; branch "$BR_HQ"; terminal 1
 call @api1 POST /sales "$SALE"

@@ -74,7 +74,7 @@ expect_sql "SELECT voided_by || ':' || void_approved_by || ':' || void_shift_id 
 expect_sql "SELECT invoice_no || ':' || (cancelled_at IS NOT NULL) || ':' || cancel_reason FROM dt_tax_invoices WHERE tenant_id = $TENANT AND sale_id = $SALE" \
   "$INV:true:ยกเลิกบิล: ลูกค้าเปลี่ยนใจ"
 expect_sql "SELECT action || ':' || user_id || ':' || branch_id || ':' || detail FROM dt_audit_log WHERE tenant_id = $TENANT AND action = 'sale_void'" \
-  "sale_void:$U_CASH1:$BR_HQ:฿25700 — ลูกค้าเปลี่ยนใจ (อนุมัติโดย คุณบอส)"
+  "sale_void:$U_CASH1:$BR_HQ:฿25,700 — ลูกค้าเปลี่ยนใจ (อนุมัติโดย คุณบอส)"
 
 case_id 22.4 "ยกเลิกซ้ำ"
 call POST "/sales/$SALE/void" "$(void_body "ซ้ำ" "$(approval boss pass1234)")"

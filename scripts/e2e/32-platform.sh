@@ -132,7 +132,7 @@ call @api2 POST "/platform/invoices/$INV_ID/pay"
 expect_status 200
 check "เปิดใช้งานเอง, openAmount 0" "true null 0" "$(num .active) $(num .suspendedReason) $(num .openAmount)"
 expect_sql "SELECT status || ':' || (paid_at IS NOT NULL) FROM dt_billing_invoices WHERE id = $INV_ID" "paid:true"
-check "audit invoice_paid" "invoice_paid:platform:null:$P_NAME:$INV_NO:฿3490" "$(audit_last "$OD" invoice_paid)"
+check "audit invoice_paid" "invoice_paid:platform:null:$P_NAME:$INV_NO:฿3,490" "$(audit_last "$OD" invoice_paid)"
 login "$OD_CODE" owner owner1234
 expect_status 200
 call POST "/platform/invoices/$INV_ID/pay"
