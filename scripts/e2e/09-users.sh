@@ -98,7 +98,7 @@ U_CASH3=$(jq -r .id <<<"$BODY")
 expect_json '[.username, .role, (.branchIds | map(tostring) | join(",")), .allBranches] | map(tostring) | join(" ")' "cash3 user $BR_HQ false"
 expect_sql "SELECT username || ':' || (password_hash LIKE '\$2a\$10\$%') || ':' || (SELECT count(*) FROM dt_user_branches b WHERE b.tenant_id = u.tenant_id AND b.user_id = u.id)
   FROM dt_users u WHERE id = $U_CASH3" "cash3:true:1"
-check "audit user_change เพิ่ม" "user_change:$U_BOSS:cash3:เพิ่มผู้ใช้ — ผู้ใช้ทั่วไป · สาขา $BR_HQ" "$(audit_last user_change)"
+check "audit user_change เพิ่ม" "user_change:$U_BOSS:cash3:เพิ่มผู้ใช้ — ผู้ใช้ทั่วไป · สาขา HQ" "$(audit_last user_change)"
 call PUT "/users/$U_CASH3" '{"name":"แคชเชียร์สาม"}'
 expect_status 200
 expect_json '[.name, .username, .role, .email, (.branchIds | map(tostring) | join(",")), .active] | map(tostring) | join(" ")' "แคชเชียร์สาม cash3 user  $BR_HQ true"
