@@ -3,3 +3,6 @@
 target/
 .multi.env.keep
 .e2e/
+.classpath
+.project
+.settings/
