@@ -27,6 +27,7 @@ docker compose up -d               # dev DB: postgres (5432) + pgbouncer (6432) 
 curl -s localhost:8080/api/healthz # {"status":"ok"}; /api/readyz ping DB
 docker compose down -v             # รีเซ็ต DB local
 scripts/db-apply.sh [--roles] [--seed]   # รัน script DB ด้วยมือ (ทางที่ 2 / DBA) — db/README.md, คู่มือ DB ว่าง → พร้อมใช้ docs/db-init.md
+scripts/local-stack.sh [up|down|status] [--build]   # api + web เป็น container บนเครื่องนี้ ต่อ DB + PgBouncer ที่ init ตาม docs/db-init.md → http://localhost:14000
 docker build -t an22-api:$(git rev-parse --short HEAD) .   # image production
 docker compose --profile api up -d --build                  # ลอง image กับ dev DB (port 8080; ไม่มี seed ใน image)
 scripts/multi-instance-check.sh    # api 2 ตัวหลัง lb (compose.multi.yaml, project an22-multi แยกจาก dev): token ข้าม instance, ขายพร้อมกัน, job ครั้งเดียว — KEEP=1 เก็บ stack
