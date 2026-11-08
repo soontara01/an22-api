@@ -303,7 +303,7 @@ public class SaleService {
     List<Product> stock = products.listAt(branch, List.copyOf(ids)).stream().map(p -> withPrice(p, current.get(p.id()))).toList();
     return PosPricing.priceCart(items, new PosPricing.PricingContext(stock, promos, categories.list(), today,
         Boolean.TRUE.equals(info.vatRegistered()), branch), body.freeSerials() == null ? List.of() : body.freeSerials(),
-        body.billManualDiscount());
+        body.billManualDiscount(), body.promotionChoices());
   }
 
   /** ตัดสต็อกทีละบรรทัด (เรียงตาม productId — กัน deadlock) → COGS ตามลำดับบรรทัดของบิล. */

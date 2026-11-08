@@ -163,7 +163,8 @@ public final class PosPricing {
   }
 
   /** {@code priceCart()}: ไม่ throw — บรรทัดที่ขายไม่ได้ถูกตัดออกและรายงานใน issues. */
-  public static PricedCart priceCart(List<CartItem> items, PricingContext ctx, List<FreeSerial> freeSerials, ManualDiscount billManual) {
+  public static PricedCart priceCart(List<CartItem> items, PricingContext ctx, List<FreeSerial> freeSerials, ManualDiscount billManual,
+      List<Long> promotionChoices) {
     List<CartIssue> issues = new ArrayList<>();
     Map<Long, Product> products = new HashMap<>();
     for (Product p : ctx.products()) {
@@ -237,7 +238,7 @@ public final class PosPricing {
       List<Promotion> candidates = itemPromos.stream().filter(p -> inScope(p, line.product, ctx)).toList();
       line.promos = selectPromotions(candidates, p -> "item_discount".equals(p.type())
           ? line.baseQty >= p.minQty()
-          : Boolean.TRUE.equals(reachable.get(p.id())));
+          : Boolean.TRUE.equals(reachable.get(p.id())), promotionChoices);
       double unitPrice = line.product.currentPrice();
       for (Promotion p : line.promos) {
         if ("item_discount".equals(p.type()) && p.discount() != null) {
@@ -327,7 +328,7 @@ public final class PosPricing {
     double afterItems = sum(lines.stream().map(l -> l.gross - l.itemDiscount).toList());
     List<Promotion> billPromos = selectPromotions(
         active.stream().filter(p -> "bill_discount".equals(p.type())).toList(),
-        p -> afterItems > 0 && afterItems >= p.minAmount());
+        p -> afterItems > 0 && afterItems >= p.minAmount(), promotionChoices);
     double running = afterItems;
     for (Promotion p : billPromos) {
       if (p.discount() != null) {
@@ -405,10 +406,20 @@ public final class PosPricing {
     void add(Integer index, long productId, String message);
   }
 
-  /** {@code selectPromotions()}: ตัวแรกที่เข้าเงื่อนไขใช้เสมอ (ไม่ stackable = หยุด), ตัวต่อไปเฉพาะที่ stackable. */
-  private static List<Promotion> selectPromotions(List<Promotion> candidates, Predicate<Promotion> eligible) {
+  /**
+   * {@code selectPromotions()}: ตัวแรกที่เข้าเงื่อนไขใช้เสมอ (ไม่ stackable = หยุด), ตัวต่อไปเฉพาะที่ stackable. โปรที่แคชเชียร์เลือก
+   * (choices ใหม่สุดก่อน, E51) ตัวแรกที่เป็นผู้สมัครและเข้าเงื่อนไขแทนค่าเริ่มต้น: ไม่ stackable = ใช้ตัวเดียว, stackable = เหลือเฉพาะตัวที่ stackable.
+   */
+  private static List<Promotion> selectPromotions(List<Promotion> candidates, Predicate<Promotion> eligible, List<Long> choices) {
+    Promotion picked = choices == null ? null : choices.stream()
+        .flatMap(id -> candidates.stream().filter(p -> p.id().equals(id) && eligible.test(p)).limit(1))
+        .findFirst().orElse(null);
+    List<Promotion> walk = picked == null ? candidates
+        : Boolean.TRUE.equals(picked.stackable())
+            ? candidates.stream().filter(p -> Boolean.TRUE.equals(p.stackable())).toList()
+            : List.of(picked);
     List<Promotion> applied = new ArrayList<>();
-    for (Promotion p : candidates) {
+    for (Promotion p : walk) {
       if (!eligible.test(p)) {
         continue;
       }
