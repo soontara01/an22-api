@@ -1,0 +1,9 @@
+{
+  "name": "an22-db-manual-tools",
+  "private": true,
+  "description": "เครื่องมือสร้างเอกสาร DB (docs/db-manual) — ไม่ใช่ส่วนของแอป",
+  "type": "module",
+  "dependencies": {
+    "@viz-js/viz": "3.31.0"
+  }
+}

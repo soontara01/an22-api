@@ -1,0 +1,137 @@
+/* เอกสาร DB — A4, พิมพ์ด้วย Chrome headless (build.sh) — รูปแบบเดียวกับคู่มือผู้ใช้ของ FrontEnd-An22 */
+:root {
+  --ink: #1b1b1f;
+  --muted: #5d5e67;
+  --line: #c9cad3;
+  --accent: #0b57d0;
+  --accent-soft: #e8efff;
+  --note: #eef6ee;
+  --note-line: #2e7d32;
+  --warn: #fff4e5;
+  --warn-line: #e65100;
+  --code-bg: #f3f3f6;
+}
+@page { size: A4; margin: 14mm 13mm 16mm; @bottom-center { content: counter(page); font: 8.5pt "Noto Sans Thai", sans-serif; color: #5d5e67; } }
+@page :first { @bottom-center { content: none; } }
+@page wide { size: A4 landscape; margin: 11mm 12mm 13mm; }
+* { box-sizing: border-box; }
+html { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+body { margin: 0; background: #fff; color: var(--ink); font: 9.5pt/1.6 "Noto Sans Thai", "Noto Sans", sans-serif; counter-reset: ch; }
+h1, h2, h3, h4 { line-height: 1.3; }
+a { color: var(--accent); text-decoration: none; }
+code { font: 8.3pt "Noto Sans Mono", monospace; background: var(--code-bg); padding: 0 .8mm; border-radius: 1mm; overflow-wrap: anywhere; }
+
+/* ปก / สารบัญ */
+.cover { height: 262mm; display: flex; flex-direction: column; justify-content: center; break-after: page; }
+.cover .kicker { color: var(--accent); font-weight: 700; }
+.cover h1 { font-size: 30pt; margin: 6mm 0 3mm; }
+.cover .sub { font-size: 13pt; color: var(--muted); margin: 0 0 14mm; }
+.cover .meta { border-top: 2px solid var(--accent); padding-top: 5mm; color: var(--muted); font-size: 10pt; line-height: 1.9; }
+.cover .meta b { color: var(--ink); display: inline-block; min-width: 26mm; }
+.toc { break-after: page; }
+.toc h2 { font-size: 18pt; margin: 0 0 5mm; }
+.toc ol { list-style: none; padding: 0; margin: 0; }
+.toc > ol > li { margin: 0 0 2.2mm; font-weight: 700; font-size: 10.5pt; }
+.toc ol ol { font-weight: 400; margin: .5mm 0 0 7mm; font-size: 8.8pt; color: var(--muted); }
+.toc ol ol li { display: inline; }
+.toc ol ol li + li::before { content: " · "; }
+
+/* บท */
+section.chapter { break-before: page; counter-increment: ch; }
+section.chapter > h2 { font-size: 18pt; margin: 0 0 2mm; padding-bottom: 2mm; border-bottom: 2px solid var(--accent); }
+section.chapter > h2::before { content: "บทที่ " counter(ch) "  "; color: var(--accent); }
+section.appendix > h2::before { content: none; }
+.lead { color: var(--muted); margin: 0 0 4mm; }
+h3 { font-size: 12.5pt; margin: 6mm 0 2mm; break-after: avoid; }
+h3.domain { font-size: 14pt; margin-top: 8mm; padding-bottom: 1mm; border-bottom: 1px solid var(--line); }
+h4 { font-size: 11pt; margin: 0 0 1mm; break-after: avoid; }
+p { margin: 0 0 2.2mm; }
+ul, ol { margin: 0 0 2.5mm; padding-left: 5.5mm; }
+li { margin-bottom: .6mm; }
+.note { font-size: 8.5pt; color: var(--muted); }
+.ref { font-size: 7pt; color: #8a8b93; vertical-align: .5pt; }
+.box { border-left: 4px solid var(--note-line); background: var(--note); padding: 2.2mm 3.5mm; margin: 3mm 0 4mm; border-radius: 0 2mm 2mm 0; break-inside: avoid; }
+.box.warn { border-color: var(--warn-line); background: var(--warn); }
+.box > b:first-child { display: block; margin-bottom: .5mm; }
+.dom { display: inline-block; min-width: 5.2mm; padding: 0 1.2mm; margin-right: 1.8mm; border-radius: 1.2mm; color: #fff; font-weight: 700; text-align: center; font-size: .85em; }
+.dot { display: inline-block; width: 2.4mm; height: 2.4mm; border-radius: 50%; margin-right: 1.5mm; vertical-align: 0; }
+
+/* ตาราง */
+table { width: 100%; border-collapse: collapse; margin: 1.5mm 0 4mm; font-size: 8.5pt; }
+th, td { border: 1px solid var(--line); padding: .9mm 1.6mm; text-align: left; vertical-align: top; }
+th { background: var(--accent-soft); }
+thead { display: table-header-group; }
+tr { break-inside: avoid; }
+td.c, th.c { text-align: center; }
+
+/* รูป */
+figure { margin: 3mm 0 5mm; break-inside: avoid; text-align: center; }
+figure .svg svg { max-width: 100%; height: auto; }
+figcaption { font-size: 8.5pt; color: var(--muted); margin-top: 1.5mm; }
+.landscape { page: wide; }
+section.landscape { break-before: page; }
+figure.er.wide .svg svg { max-height: 165mm; }
+.er-pages { counter-increment: none; }
+.er-pages figure.er { break-before: page; margin: 0; }
+.er-pages figure.er .svg svg { max-height: 245mm; }
+.legend { display: grid; grid-template-columns: auto 1fr; gap: 1mm 4mm; align-items: center; font-size: 8.8pt; }
+.legend svg { width: 26mm; height: 6mm; }
+
+/* data dictionary */
+article.table { margin: 0 0 6mm; padding-top: 3mm; border-top: 1px solid var(--line); }
+article.table h4 code { font-size: 10.5pt; background: none; padding: 0; margin-right: 1.5mm; }
+.purpose { margin-bottom: 1.5mm; }
+.blk { margin: 0 0 1.5mm; }
+.blk > b { font-size: 8.8pt; color: var(--muted); }
+.blk ul { margin: .3mm 0 0; }
+.blk li { margin-bottom: .2mm; }
+p.meta { font-size: 8pt; color: var(--muted); margin: 0 0 1.5mm; }
+table.dict { font-size: 8pt; }
+table.dict td:nth-child(1) { width: 5mm; color: var(--muted); }
+table.dict td:nth-child(2) { width: 33mm; }
+table.dict td:nth-child(3) { width: 25mm; }
+table.dict td:nth-child(4) { width: 8mm; }
+table.dict td:nth-child(5) { width: 18mm; }
+table.dict td:nth-child(6) { width: 11mm; }
+table.dict code { font-size: 7.6pt; background: none; padding: 0; }
+table.dict code.col { font-weight: 700; color: var(--ink); }
+table.dict td:last-child code { background: var(--code-bg); padding: 0 .6mm; }
+tr.stamp td { color: var(--muted); font-size: 7.6pt; background: #fafafc; }
+.k { display: inline-block; font: 700 6.4pt/1.45 "Noto Sans", sans-serif; padding: 0 .8mm; border-radius: .8mm; margin: .2mm; color: #fff; }
+.k.pk { background: #1b1b1f; }
+.k.fk { background: var(--accent); }
+.k.uq { background: #6a1b9a; }
+.k.ref { background: #8a8b93; }
+.to { font-size: 7.6pt; color: var(--muted); }
+.enum { font-size: 7.6pt; color: var(--muted); margin-top: .3mm; }
+.cons-wrap { break-inside: auto; }
+ul.cons { font-size: 7.6pt; color: var(--muted); columns: 1; margin: 0 0 1mm; padding-left: 4mm; }
+ul.cons li { margin: 0; }
+ul.cons code { font-size: 7.2pt; }
+
+/* ขั้นตอน */
+.flow-block { break-inside: auto; }
+table.flow td:nth-child(1) { width: 8mm; }
+table.flow td:nth-child(2) { width: 46mm; }
+table.flow td:nth-child(3) { width: 11mm; }
+.op { display: inline-block; font-weight: 700; font-size: 7.6pt; padding: 0 1.2mm; border-radius: 1mm; color: #fff; }
+.op-I { background: #2e7d32; }
+.op-U { background: #ef6c00; }
+.op-D { background: #c62828; }
+.op-R { background: #5d5e67; }
+.op-L { background: #6a1b9a; }
+
+/* CRUD / สิทธิ์ */
+table.crud { font-size: 7.4pt; table-layout: fixed; }
+table.crud th.v { height: 22mm; vertical-align: bottom; padding: .5mm; }
+table.crud th.v div { writing-mode: vertical-rl; transform: rotate(180deg); white-space: nowrap; margin: 0 auto; font: 7.4pt "Noto Sans Mono", monospace; }
+table.crud th:first-child, table.crud td.tn { width: 40mm; }
+table.crud td { padding: .2mm .6mm; line-height: 1.35; }
+table.crud td.crud { font: 700 7pt "Noto Sans Mono", monospace; letter-spacing: -.2pt; }
+table.crud td.none { background: #fafafc; }
+table.crud .dyn { color: #8a8b93; }
+table.grants { font-size: 7.8pt; }
+table.grants td:nth-child(2), table.grants td:nth-child(3), table.grants td:nth-child(4) { width: 22mm; white-space: nowrap; }
+table.grants td:first-child { white-space: nowrap; }
+table.grants tr { line-height: 1.35; }
+table.roles td:first-child { white-space: nowrap; }

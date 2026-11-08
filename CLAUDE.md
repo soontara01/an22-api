@@ -161,6 +161,8 @@ src/test/java/com/an22/api/
 - policy ใช้ `app_tenant_id()` (ค่าว่าง → null → 0 แถว, ไม่ error); ตารางใหม่ copy รูปแบบจาก `V1__base.sql` (คอลัมน์ stamp, trigger, RLS, grant)
   — `SchemaConventionsIT` ตรวจกติกาทั้งหมดนี้กับ DB จริง: ผิดกติกา test แดง (ตาราง platform ที่ an22_app แตะได้ต้องเพิ่มใน `APP_PLATFORM_GRANTS` อย่างตั้งใจ)
 - an22_app อ่านตาราง platform ได้แค่ `dt_companies` — ใบแจ้งหนี้ / reset token / platform admin ใช้ `platformTx`
+- เอกสาร DB สำหรับ SA (PDF: ER + data dictionary + ขั้นตอน → ตาราง + CRUD + ความปลอดภัย) `docs/db-manual/` — migration ใหม่ / เปลี่ยนคอลัมน์ →
+  เพิ่มคำอธิบายใน `docs/db-manual/descriptions.mjs` ให้ `docs/db-manual/build.sh --check` ผ่าน แล้ว `build.sh` + commit PDF ใน commit เดียวกัน
 - seed (`db/seed`, version แทรกหลัง migration ที่ใช้) = `seedDb()` ของ mock: DEMO, HQ + BN, `admin`/`admin`, `somchai`/`1234`, platform `platform`/`platform` — dev / test เท่านั้น (profile `dev` / `test` เพิ่ม location)
 
 ## Config (env — ครบใน `.env.example`)

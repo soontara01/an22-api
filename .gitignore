@@ -6,3 +6,5 @@ target/
 .classpath
 .project
 .settings/
+docs/db-manual/build/
+docs/db-manual/tools/node_modules/
