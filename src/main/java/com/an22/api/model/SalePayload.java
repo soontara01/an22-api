@@ -4,7 +4,7 @@ import java.util.List;
 
 /**
  * {@code SalePayload} ({@code POST /sales}, {@code /sales/cost-check}): server คิดตะกร้าใหม่ — expectedTotal ต่างจากที่คิดได้ → 400; buyer = ขอใบกำกับ
- * เต็มรูปพร้อมบิล.
+ * เต็มรูปพร้อมบิล; promotionChoices = โปรที่แคชเชียร์เลือกแทนลำดับ ใหม่สุดก่อน (E51).
  */
 public record SalePayload(
     List<CartItem> items,
@@ -14,7 +14,8 @@ public record SalePayload(
     Double expectedTotal,
     TaxInvoiceBuyer buyer,
     ManualDiscount billManualDiscount,
-    String manualDiscountReason) {
+    String manualDiscountReason,
+    List<Long> promotionChoices) {
 
   /** {@code VoidPayload}: ไม่ใช่ admin ต้องมี login ของ admin (P3). */
   public record VoidRequest(String reason, ShiftPayloads.Credentials approval) {}

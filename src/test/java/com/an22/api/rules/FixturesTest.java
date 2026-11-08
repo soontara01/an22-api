@@ -39,7 +39,7 @@ class FixturesTest {
 
   record PriceCartInput(
       List<CartItem> items, PosPricing.PricingContext context, List<FreeSerial> freeSerials, ManualDiscount billManualDiscount,
-      ManualRule manualDiscountRule) {}
+      List<Long> promotionChoices, ManualRule manualDiscountRule) {}
 
   record PriceCartCase(String name, PriceCartInput input, JsonNode expected) {}
 
@@ -67,7 +67,7 @@ class FixturesTest {
     List<PriceCartCase> cases = read("price-cart.json", new TypeReference<>() {});
     return cases.stream().map(c -> DynamicTest.dynamicTest(c.name(), () -> {
       PriceCartInput in = c.input();
-      PosPricing.PricedCart cart = PosPricing.priceCart(in.items(), in.context(), in.freeSerials(), in.billManualDiscount());
+      PosPricing.PricedCart cart = PosPricing.priceCart(in.items(), in.context(), in.freeSerials(), in.billManualDiscount(), in.promotionChoices());
       assertSame(c.expected().get("cart"), JSON.valueToTree(cart), "cart");
       assertThat(PosPricing.cartError(cart)).isEqualTo(text(c.expected().get("cartError")));
       ManualRule rule = in.manualDiscountRule();

@@ -16,4 +16,5 @@ public record HeldBill(
     JsonNode buyer,
     ManualDiscount billManual,
     String manualReason,
+    List<Long> promotionChoices,
     Double total) {}

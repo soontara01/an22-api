@@ -11,6 +11,7 @@ import com.an22.api.support.TenantSql;
 import com.an22.api.support.TestCompanies;
 import com.an22.api.support.TestCompanies.Company;
 import java.nio.charset.StandardCharsets;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
@@ -218,6 +219,48 @@ class SaleIT extends ApiTest {
     sell(owner, 2, body).andExpect(status().isOk()).andExpect(jsonPath("$.manualDiscount").value(50.0))
         .andExpect(jsonPath("$.manualDiscountBy").value("owner")).andExpect(jsonPath("$.manualDiscountReason").value("ลูกค้าประจำ"));
     assertThat(companies.audit(c, "manual_discount")).containsExactly("manual_discount|POS-HQ-2-" + day + "-0001|฿50 — ลูกค้าประจำ");
+  }
+
+  private long promo(String code, int priority, double percent) throws Exception {
+    Map<String, Object> m = new HashMap<>();
+    m.put("code", code);
+    m.put("name", "โปร " + code);
+    m.put("type", "item_discount");
+    m.put("startDate", today.toString());
+    m.put("endDate", null);
+    m.put("priority", priority);
+    m.put("stackable", false);
+    m.put("enabled", true);
+    m.put("minQty", 1);
+    m.put("minAmount", 0);
+    m.put("scope", Map.of("all", false, "productIds", List.of(mouse), "categoryIds", List.of()));
+    m.put("discount", Map.of("kind", "percent", "value", percent));
+    return id(mvc.perform(as(owner, post("/promotions"), m)).andExpect(status().isOk()));
+  }
+
+  @Test
+  void sellsWithThePromotionTheCashierChoseAndParksTheChoice() throws Exception {
+    long top = promo("TOP", 9, 10);
+    long pick = promo("PICK", 1, 50);
+    Map<String, Object> body = sale(List.of(item(mouse, 1, null)), 53.5, 53.5);
+    sell(staff, 1, body).andExpect(content().json(message("ราคาหรือโปรโมชั่นมีการเปลี่ยนแปลง กรุณาตรวจสอบบิลอีกครั้ง"), true));
+
+    body.put("promotionChoices", List.of(pick));
+    var sold = JSON.readTree(sell(staff, 1, body).andExpect(status().isOk()).andReturn().getResponse().getContentAsString());
+    assertThat(sold.path("total").asDouble()).isEqualTo(53.5);
+    assertThat(sold.path("lines").get(0).path("promotionIds").get(0).asLong()).isEqualTo(pick).isNotEqualTo(top);
+
+    Map<String, Object> bill = new HashMap<>();
+    bill.put("heldAt", Instant.now().toString());
+    bill.put("customer", "");
+    bill.put("items", List.of(item(mouse, 1, null)));
+    bill.put("freeSerials", List.of());
+    bill.put("promotionChoices", List.of(pick));
+    bill.put("total", 53.5);
+    mvc.perform(at(1, as(staff, post("/pos/held-bills"), bill))).andExpect(status().isOk());
+    var held = JSON.readTree(mvc.perform(at(1, as(staff, get("/pos/held-bills")))).andExpect(status().isOk())
+        .andReturn().getResponse().getContentAsString());
+    assertThat(held.get(0).path("promotionChoices").get(0).asLong()).isEqualTo(pick);
   }
 
   @Test

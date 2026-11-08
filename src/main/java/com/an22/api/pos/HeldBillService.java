@@ -59,7 +59,8 @@ public class HeldBillService {
     Instant heldAt = heldAt(in.heldAt());
     HeldBill bill = new HeldBill(null, heldAt.toString(), in.customer() == null ? "" : in.customer(), in.items(),
         in.freeSerials() == null ? List.of() : in.freeSerials(), in.buyer() == null || in.buyer().isNull() ? null : in.buyer(),
-        in.billManual(), in.manualReason() == null ? "" : in.manualReason(), in.total() == null ? 0.0 : in.total());
+        in.billManual(), in.manualReason() == null ? "" : in.manualReason(),
+        in.promotionChoices() == null ? List.of() : in.promotionChoices(), in.total() == null ? 0.0 : in.total());
     long id = dao.insert(place.branchId(), place.terminalId(), heldAt, cipher.encryptString(json.writeValueAsString(bill), aad(s)));
     return withId(bill, id);
   }
@@ -110,6 +111,6 @@ public class HeldBillService {
 
   private static HeldBill withId(HeldBill b, long id) {
     return new HeldBill(Long.toString(id), b.heldAt(), b.customer(), b.items(), b.freeSerials(), b.buyer(), b.billManual(),
-        b.manualReason(), b.total());
+        b.manualReason(), b.promotionChoices(), b.total());
   }
 }
