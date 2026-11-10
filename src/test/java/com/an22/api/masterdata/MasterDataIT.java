@@ -38,6 +38,8 @@ class MasterDataIT extends ApiTest {
   void demoSeedMatchesTheMock() throws Exception {
     mvc.perform(as(demo, get("/categories"))).andExpect(status().isOk())
         .andExpect(jsonPath("$.length()").value(17))
+        .andExpect(jsonPath("$[0].level").value(1))
+        .andExpect(jsonPath("$[0].parentId").value(Matchers.nullValue()))
         .andExpect(jsonPath("$[2].code").value("IT-COM-NB"))
         .andExpect(jsonPath("$[2].parentId").value(2))
         .andExpect(jsonPath("$[2].level").value(3))

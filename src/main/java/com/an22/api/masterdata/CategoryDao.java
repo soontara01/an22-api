@@ -49,7 +49,8 @@ public class CategoryDao {
 
   private static Category row(ResultSet rs, int i) throws SQLException {
     long parent = rs.getLong("parent_id");
-    return new Category(rs.getLong("id"), rs.getString("code"), rs.getString("name"), rs.wasNull() ? null : parent,
+    Long parentId = rs.wasNull() ? null : parent;
+    return new Category(rs.getLong("id"), rs.getString("code"), rs.getString("name"), parentId,
         rs.getInt("level"), rs.getBoolean("active"), rs.getInt("product_count"));
   }
 }
