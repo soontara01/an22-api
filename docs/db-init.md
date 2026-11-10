@@ -173,7 +173,7 @@ start แล้วตรวจ:
 
 ## ต่อจากนี้
 
-- **ลองทั้ง stack บนเครื่องนี้**: `scripts/local-stack.sh --build` — api + web เป็น container ใน network เดียวกับ DB / PgBouncer → http://localhost:14000 (`down` / `status`, ตัวแปรดู `--help`)
+- **ลองทั้ง stack บนเครื่องนี้**: `scripts/local-stack.sh --build` — api + web + MongoDB (session ของ web) เป็น container ใน network เดียวกับ DB / PgBouncer → http://localhost:14000 (`down` / `status`, ตัวแปรดู `--help`)
 - **deploy version ใหม่**: checkout commit ของ image ใหม่ → `scripts/db-apply.sh` (ไม่ต้อง `--roles`) **ก่อน** deploy image —
   image ใหม่ที่มี migration ใหม่ start ไม่ได้จนกว่าจะ migrate (validate ไม่ผ่าน)
 - **เปลี่ยนรหัส role**: แก้ `.env` → `scripts/db-apply.sh --roles` → อัปเดตรหัสที่แอป (และ PgBouncer ถ้าตั้งเอง) แล้ว restart
