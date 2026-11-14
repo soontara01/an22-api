@@ -5,7 +5,7 @@ import com.an22.api.audit.AuditEntry;
 import com.an22.api.auth.SessionDao.Via;
 import com.an22.api.db.ActorDao;
 import com.an22.api.db.TxActor;
-import com.an22.api.model.LoginResponse;
+import com.an22.api.model.MfaChallenge;
 import com.an22.api.model.SignupPayload;
 import com.an22.api.model.User;
 import com.an22.api.rules.CompanyRules;
@@ -69,9 +69,9 @@ public class AccountService {
 
   /**
    * {@code POST /auth/signup}: บริษัททดลองใช้ {@code TRIAL_DAYS} วันของแพ็กเกจที่เลือก + ข้อมูลบริษัท, สาขาแรก, owner, ช่องทางเงินสด — แล้ว login
-   * เป็น owner. รหัสเคยใช้ (รวมบริษัทที่ลบแล้ว) → 400. เกิน {@link #SIGNUP_IP_MAX} ครั้ง / IP → 429.
+   * เป็น owner หลังผูก Microsoft Authenticator (ตอบ {@link MfaChallenge} แบบ setup — E57). รหัสเคยใช้ (รวมบริษัทที่ลบแล้ว) → 400. เกิน {@link #SIGNUP_IP_MAX} ครั้ง / IP → 429.
    */
-  public LoginResponse signup(SignupPayload in, String ip) {
+  public MfaChallenge signup(SignupPayload in, String ip) {
     limit(Map.of(new ThrottleKey("ip", "signup:" + ip), SIGNUP_IP_MAX));
     return tx.signup(in);
   }

@@ -70,11 +70,6 @@ public class MfaService {
     return dao.delete(via, tenantId, userId);
   }
 
-  /** มี secret ที่รอยืนยันไหม. */
-  public boolean hasPending(Via via, long tenantId, long userId) {
-    return dao.find(via, tenantId, userId).filter(row -> !row.confirmed()).isPresent();
-  }
-
   static String aad(long tenantId) {
     return PiiCipher.aad("dt_user_mfa", "secret", tenantId);
   }

@@ -74,8 +74,9 @@ class CompanyAccountIT extends ApiTest {
     // ตัวกรอง: action / branchId / userId; ค่าที่อ่านไม่ได้ = ไม่กรอง
     mvc.perform(lastYear(as(owner, get("/audit-log"))).param("action", "stock_out").param("branchId", Long.toString(c.bn())))
         .andExpect(jsonPath("$[*].detail", Matchers.contains("ของสาขา BN")));
+    // login ของ test ผ่านขั้นรหัสพร้อมผูกใหม่ทุกครั้ง (E57) → mfa_enable ก่อน login
     mvc.perform(lastYear(as(owner, get("/audit-log"))).param("action", "nope").param("userId", Long.toString(c.boss())))
-        .andExpect(jsonPath("$[*].action", Matchers.contains("login")))
+        .andExpect(jsonPath("$[*].action", Matchers.contains("login", "mfa_enable")))
         .andExpect(jsonPath("$[0].userName").value("boss"));
     mvc.perform(lastYear(as(owner, get("/audit-log"))).param("userId", "x").param("action", "menu_access"))
         .andExpect(jsonPath("$[*].detail", Matchers.contains("ระดับบริษัท")));

@@ -97,16 +97,31 @@ terminal() { if [[ "$1" == - ]]; then E2E_TERMINAL=""; else E2E_TERMINAL="$1"; f
 rand_ip() { echo "10.$((E2E_STEP % 256)).$((RANDOM % 256)).$((RANDOM % 254 + 1))"; }
 
 # call [@api1|@api2] METHOD PATH [BODY|-] [HEADER…]
+# ร้าน (E57): ทุก login ต้องผ่านรหัส Microsoft Authenticator — call ทำแทนผู้ใช้ที่ถือมือถือ: ก่อน POST /auth/login ล้าง Authenticator ของผู้ใช้นั้น
+# (ได้ setup + secret ทุกครั้ง) และเมื่อ /auth/login หรือ /auth/signup ตอบ setup ก็ส่งรหัสต่อเอง → $STATUS / $BODY = ของ /auth/mfa/verify
+# (session + token เหมือน login เดิม). E2E_RAW_LOGIN=1 = ไม่ทำแทน (ดูคำตอบขั้นรหัสผ่านตรง ๆ)
 call() {
-  local base=$LB
+  local base=$LB tag=@lb
   case "${1:-}" in
-    @api1) base=$API1; shift ;;
-    @api2) base=$API2; shift ;;
+    @api1) base=$API1; tag=@api1; shift ;;
+    @api2) base=$API2; tag=@api2; shift ;;
     @lb) shift ;;
   esac
   local method=$1 path=$2 body=${3:--}
   shift 2
   [[ $# -gt 0 ]] && shift
+  local auto_mfa=false
+  if [[ "$method" == POST && ( "$path" == /auth/login || "$path" == /auth/signup ) && -z "${E2E_RAW_LOGIN:-}" ]]; then
+    auto_mfa=true
+    if [[ "$path" == /auth/login && "$body" != - ]]; then
+      local who
+      who=$(jq -r '[(.companyCode // "" | tostring | gsub("^\\s+|\\s+$"; "") | ascii_upcase), (.username // "" | tostring | gsub("^\\s+|\\s+$"; "") | ascii_downcase)] | @tsv' <<<"$body" 2>/dev/null || true)
+      if [[ -n "$who" && "$who" =~ ^[A-Z0-9]*$'\t'[a-z0-9._-]*$ ]]; then
+        sql "DELETE FROM dt_user_mfa m USING dt_users u, dt_companies c WHERE m.tenant_id = u.tenant_id AND m.user_id = u.id
+          AND u.tenant_id = c.id AND c.code = '${who%%$'\t'*}' AND u.username = '${who#*$'\t'}'" >/dev/null
+      fi
+    fi
+  fi
   local args=(-s -m 60 -o "$E2E_WORK/body" -D "$E2E_WORK/headers" -w '%{http_code}' -X "$method")
   local h has_ip=false has_type=false
   for h in "$@"; do
@@ -132,6 +147,16 @@ call() {
   if [[ "$STATUS" =~ ^[45] ]] && ! jq -e 'type == "object" and keys == ["message"] and (.message | type == "string")' <<<"$BODY" >/dev/null 2>&1; then
     E2E_SHAPE_BAD=$((E2E_SHAPE_BAD + 1))
     echo "     (error ไม่ใช่ {message}: $method $path → $STATUS ${BODY:0:200})"
+  fi
+  if $auto_mfa && [[ "$STATUS" == 200 ]]; then
+    local challenge secret saved=$E2E_TOKEN
+    challenge=$(jq -r 'objects | .challenge // empty' <<<"$BODY" 2>/dev/null || true)
+    secret=$(jq -r 'objects | .setup.secret // empty' <<<"$BODY" 2>/dev/null || true)
+    if [[ -n "$challenge" && -n "$secret" ]]; then
+      E2E_TOKEN=$challenge
+      call "$tag" POST /auth/mfa/verify "{\"code\":\"$(totp "$secret")\"}" "$@"
+      E2E_TOKEN=$saved
+    fi
   fi
   return 0
 }

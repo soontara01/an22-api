@@ -10,30 +10,9 @@ import org.junit.jupiter.api.Test;
 class MfaRulesTest {
 
   @Test
-  void requiresByTheCompanyRule() {
-    assertThat(MfaRules.mfaRequiredFor("owner", "none")).isFalse();
-    assertThat(MfaRules.mfaRequiredFor("owner", "admins")).isTrue();
-    assertThat(MfaRules.mfaRequiredFor("admin", "admins")).isTrue();
-    assertThat(MfaRules.mfaRequiredFor("user", "admins")).isFalse();
-    assertThat(MfaRules.mfaRequiredFor("user", "all")).isTrue();
-    assertThat(MfaRules.mfaRequiredFor("user", null)).isFalse();
-  }
-
-  @Test
-  void codeStepWhenAskedOrEnabledOrRequired() {
-    assertThat(MfaRules.loginNeedsMfa("user", false, "none", false)).isFalse();
-    assertThat(MfaRules.loginNeedsMfa("user", false, "none", true)).isTrue();
-    assertThat(MfaRules.loginNeedsMfa("user", true, "none", false)).isTrue();
-    assertThat(MfaRules.loginNeedsMfa("user", false, "all", false)).isTrue();
-  }
-
-  @Test
-  void disableAndResetMessages() {
-    assertThat(MfaRules.mfaDisableError("user", false, "none")).isEqualTo("ยังไม่ได้เปิดใช้ Microsoft Authenticator");
-    assertThat(MfaRules.mfaDisableError("admin", true, "admins")).isEqualTo("บริษัทบังคับให้ใช้ Microsoft Authenticator — ปิดเองไม่ได้");
-    assertThat(MfaRules.mfaDisableError("user", true, "admins")).isNull();
-    assertThat(MfaRules.mfaResetError(1, true, 1)).isEqualTo("ล้าง Microsoft Authenticator ของตัวเองไม่ได้ — ปิดได้ที่หน้าตั้งค่า");
-    assertThat(MfaRules.mfaResetError(2, false, 1)).isEqualTo("ผู้ใช้นี้ยังไม่ได้เปิดใช้ Microsoft Authenticator");
+  void resetMessages() {
+    assertThat(MfaRules.mfaResetError(1, true, 1)).isEqualTo("ล้าง Microsoft Authenticator ของตัวเองไม่ได้ — ให้ผู้ดูแลระบบคนอื่นล้างให้");
+    assertThat(MfaRules.mfaResetError(2, false, 1)).isEqualTo("ผู้ใช้นี้ยังไม่ได้ผูก Microsoft Authenticator");
     assertThat(MfaRules.mfaResetError(2, true, 1)).isNull();
   }
 

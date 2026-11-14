@@ -45,8 +45,7 @@ public class AuthService {
     this.jwt = jwt;
   }
 
-  /** {@code mfa: true} = เข้าทาง {@code /auth/login-mfa}: ถามรหัส Authenticator เสมอ (E55). */
-  public record LoginRequest(String companyCode, String username, String password, Boolean mfa) {}
+  public record LoginRequest(String companyCode, String username, String password) {}
 
   public record MfaVerifyRequest(String code) {}
 
@@ -66,7 +65,7 @@ public class AuthService {
     try {
       // ออกใบแจ้งหนี้ / ระงับค้างชำระที่ถึงรอบก่อน job (แผนหัวข้อ "Stateless / scale") — commit ของตัวเองแม้ login ไม่ผ่าน
       tx.companyId(code).ifPresent(billing::catchUp);
-      LoginResult response = tx.attempt(code, username, req.password(), Boolean.TRUE.equals(req.mfa()));
+      LoginResult response = tx.attempt(code, username, req.password());
       // ขั้นรหัส Authenticator (E55) ยังไม่ใช่ login สำเร็จ: คืนสิทธิ์ที่จองแต่ไม่ล้างตัวนับของบัญชี (ไม่งั้นรหัสผ่านถูกล้างตัวนับรหัส 6 หลักที่ผิดได้เรื่อย ๆ)
       ok = response instanceof LoginResponse;
       return response;

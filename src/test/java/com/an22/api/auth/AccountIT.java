@@ -61,7 +61,17 @@ class AccountIT extends ApiTest {
   void signupCreatesATrialCompanyAndLogsTheOwnerIn() throws Exception {
     String code = newCode();
     String trialEnd = LocalDate.now(ClockConfig.BANGKOK).plusDays(14).toString();
-    String body = call("/auth/signup", signup(code)).andExpect(status().isOk())
+    // สมัครแล้วต้องผูก Microsoft Authenticator ก่อนเข้าระบบ (E57)
+    String step1 = call("/auth/signup", signup(code)).andExpect(status().isOk())
+        .andExpect(jsonPath("$.token").doesNotExist())
+        .andExpect(jsonPath("$.mfa").value("setup"))
+        .andReturn().getResponse().getContentAsString();
+    var challenge = JSON.readTree(step1);
+    String body = mvc.perform(post("/auth/mfa/verify").header("Authorization", bearer(challenge.path("challenge").asString()))
+            .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+            .content(JSON.writeValueAsString(java.util.Map.of("code", com.an22.api.rules.TotpRules.code(
+                challenge.path("setup").path("secret").asString(), com.an22.api.rules.TotpRules.step(System.currentTimeMillis()))))))
+        .andExpect(status().isOk())
         .andExpect(jsonPath("$.token").isString())
         .andExpect(jsonPath("$.user.username").value("boss")).andExpect(jsonPath("$.user.role").value("owner"))
         .andExpect(jsonPath("$.user.allBranches").value(true))

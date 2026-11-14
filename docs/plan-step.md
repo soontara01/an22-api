@@ -599,6 +599,12 @@ CSRF กันที่ web ด้วย `XSRF-TOKEN` / `X-XSRF-TOKEN` (ขั�
 - e2e: `platform_login` + `totp` ใน `scripts/e2e/lib.sh` (ล้าง Authenticator ก่อน → setup → รหัส), case 3.14
 - test: `PlatformAuthIT` (สองขั้น, secret เดิม, challenge ใช้แทน token ไม่ได้, รหัสซ้ำ)
 
+### ขั้น 16 — ผู้ใช้ร้านทุกคนต้องใช้ Microsoft Authenticator เสมอ (E57, 2026-11-14)
+- `V12__mfa_always.sql`: drop `dt_company_info.mfa_required` — ไม่มีตัวเลือกบังคับของบริษัทอีก
+- `POST /auth/login` รหัสผ่านถูก → `MfaChallenge` เสมอ (ไม่มี field `mfa` ใน body แล้ว); `POST /auth/signup` → `MfaChallenge` แบบ setup
+  (เข้าระบบได้หลังผูกเท่านั้น); ตัด `/me/mfa/*` (ผูกตอน login เท่านั้น, ปิดเองไม่ได้); `DELETE /users/{id}/mfa` คงไว้ (มือถือหาย)
+- test: `ApiTest.login()` / `passBothSteps()` ล้าง Authenticator ของผู้ใช้แล้วผ่านสองขั้น; e2e `call()` ทำขั้นรหัสแทนเมื่อ login / signup (case 3.15)
+
 ## เรื่องที่ต้องถามผู้ใช้ระหว่างทาง (ไม่เดา)
 
 1. ~~ขั้น 2: จำกัด login ผิดต่อบัญชี / IP~~ — ตอบแล้ว 2026-10-22 (ขั้น 2)

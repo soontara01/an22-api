@@ -53,11 +53,13 @@ class LoginThrottleIT extends ApiTest {
     for (int i = 0; i < 4; i++) {
       attempt("203.0.113.4", c.code(), "boss", "wrong").andExpect(status().isUnauthorized());
     }
-    attempt("203.0.113.4", c.code(), "boss", TestCompanies.PASSWORD).andExpect(status().isOk());
+    // login สำเร็จ = ผ่านขั้นรหัส Authenticator ด้วย (E57) — รหัสผ่านถูกอย่างเดียวไม่ล้างตัวนับ
+    passBothSteps(c.code(), "boss", TestCompanies.PASSWORD, "203.0.113.4").andExpect(status().isOk());
     for (int i = 0; i < 4; i++) {
       attempt("203.0.113.4", c.code(), "boss", "wrong").andExpect(status().isUnauthorized());
     }
-    attempt("203.0.113.4", c.code(), "boss", TestCompanies.PASSWORD).andExpect(status().isOk());
+    // login สำเร็จ = ผ่านขั้นรหัส Authenticator ด้วย (E57) — รหัสผ่านถูกอย่างเดียวไม่ล้างตัวนับ
+    passBothSteps(c.code(), "boss", TestCompanies.PASSWORD, "203.0.113.4").andExpect(status().isOk());
   }
 
   @Test

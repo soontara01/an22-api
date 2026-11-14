@@ -87,10 +87,10 @@ class ShopLoginTx {
 
   /**
    * {@code code} / {@code username} normalize แล้ว — billing catch-up ทำแล้ว (ผู้เรียก). ผิด → {@link Rejected}; รหัสถูกแต่บริษัทถูกระงับ → 401 ข้อความตามเหตุ (ไม่นับผิด ไม่ล้างตัวนับ).
-   * ต้องใช้รหัส Authenticator ({@code loginNeedsMfa()}, E55) → {@link com.an22.api.model.MfaChallenge} ยังไม่ออก token / ไม่ audit {@code login}.
+   * รหัสผ่านถูก → ขั้นรหัส Authenticator เสมอ (E57) {@link com.an22.api.model.MfaChallenge} — ยังไม่ออก token / ไม่ audit {@code login}.
    */
   @Transactional("platformTx")
-  public LoginResult attempt(String code, String username, String password, boolean askedMfa) {
+  public LoginResult attempt(String code, String username, String password) {
     Optional<CompanyRow> company = code.isEmpty() ? Optional.empty() : dao.companyByCode(Via.PLATFORM, code);
     if (company.isEmpty()) {
       passwords.matches(String.valueOf(password), dummyHash);
@@ -109,10 +109,7 @@ class ShopLoginTx {
           AuthService.SUSPENDED_MESSAGE.getOrDefault(c.suspendedReason(), AuthService.SUSPENDED_MESSAGE.get("platform")));
     }
     actors.becomeOnPlatform(TxActor.user(c.id(), u.id()));
-    if (MfaRules.loginNeedsMfa(u.role(), u.mfaEnabled(), c.mfaRequired(), askedMfa)) {
-      return mfa.challenge(Via.PLATFORM, c.id(), c.code(), u);
-    }
-    return session(c, u, "");
+    return mfa.challenge(Via.PLATFORM, c.id(), c.code(), u);
   }
 
   /**
@@ -141,7 +138,7 @@ class ShopLoginTx {
     return session(c, now, "ด้วย Microsoft Authenticator");
   }
 
-  /** audit {@code login} แล้วออก session + token. */
+  /** audit {@code login} แล้วออก session + token (หลังผ่านรหัส Authenticator เท่านั้น). */
   private LoginResponse session(CompanyRow c, User u, String detail) {
     audit.insertOnPlatform(AuditEntry.ofUser(c.id(), u.id(), u.name(), null, "login", detail));
     ShopSession session = SessionService.of(c, u, dao.branches(Via.PLATFORM, c.id()), null);

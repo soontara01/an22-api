@@ -40,6 +40,11 @@ class LoginIT extends ApiTest {
         .content(JSON.writeValueAsString(Map.of("companyCode", code, "username", username, "password", password))));
   }
 
+  /** รหัสผ่านถูกแล้วรหัส 6 หลัก (E57) → คำตอบของขั้นรหัส = session + token. */
+  private ResultActions full(String code, String username, String password) throws Exception {
+    return passBothSteps(code, username, password, ip);
+  }
+
   private List<String> audit(long tenant, String action) {
     return sql.platform(jdbc -> jdbc.sql(
             "SELECT coalesce(user_id::text, '-') || ':' || user_name FROM dt_audit_log WHERE tenant_id = :t AND action = :a ORDER BY id")
@@ -48,7 +53,12 @@ class LoginIT extends ApiTest {
 
   @Test
   void demoOwnerGetsFullSessionAndToken() throws Exception {
+    // รหัสผ่านถูก = ขั้นรหัสก่อนเสมอ ยังไม่มี token
     attempt("demo", " Admin ", "admin")
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.token").doesNotExist())
+        .andExpect(jsonPath("$.mfa").isString());
+    full("demo", " Admin ", "admin")
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.token").isString())
         .andExpect(jsonPath("$.user.username").value("admin"))
@@ -66,7 +76,7 @@ class LoginIT extends ApiTest {
 
   @Test
   void staffSeesOnlyTheirBranchesAndNoCost() throws Exception {
-    attempt("DEMO", "somchai", "1234")
+    full("DEMO", "somchai", "1234")
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.user.branchIds", Matchers.contains(1)))
         .andExpect(jsonPath("$.branches[*].code", Matchers.contains("HQ")))
@@ -89,6 +99,8 @@ class LoginIT extends ApiTest {
   void successfulLoginIsAudited() throws Exception {
     Company c = companies.create();
     attempt(c.code(), "staff", TestCompanies.PASSWORD).andExpect(status().isOk());
+    assertThat(audit(c.id(), "login")).isEmpty(); // ยังไม่ผ่านขั้นรหัส
+    full(c.code(), "staff", TestCompanies.PASSWORD).andExpect(status().isOk());
     assertThat(audit(c.id(), "login")).containsExactly(c.staff() + ":staff");
     String kind = sql.platform(jdbc -> jdbc.sql(
             "SELECT created_by_kind || ':' || created_by FROM dt_audit_log WHERE tenant_id = :t AND action = 'login'")
@@ -118,7 +130,7 @@ class LoginIT extends ApiTest {
     attempt(c.code(), "boss", TestCompanies.PASSWORD)
         .andExpect(status().isUnauthorized())
         .andExpect(content().json("{\"message\":\"บริษัทนี้อยู่ระหว่างรอลบข้อมูล — ติดต่อเจ้าของบริษัท\"}", true));
-    attempt(c.code(), "owner", TestCompanies.PASSWORD)
+    full(c.code(), "owner", TestCompanies.PASSWORD)
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.company.active").value(false))
         .andExpect(jsonPath("$.company.deletionPurgeAfter").value("2026-12-01"));
@@ -138,10 +150,10 @@ class LoginIT extends ApiTest {
             "INSERT INTO dt_billing_invoices (company_id, invoice_no, plan_id, period_start, period_end, amount, issued_on, due_date, status)"
                 + " VALUES (:c, 'SUB-209901-' || lpad(:c::text, 4, '0'), 'pro', DATE '2099-01-01', DATE '2099-01-31', 3490, DATE '2099-01-01', DATE '2099-01-08', 'open')")
         .param("c", c.id()).update());
-    attempt(c.code(), "boss", TestCompanies.PASSWORD)
+    full(c.code(), "boss", TestCompanies.PASSWORD)
         .andExpect(jsonPath("$.billing.level").value("info"))
         .andExpect(jsonPath("$.billing.text").value(Matchers.startsWith("ใบแจ้งหนี้ SUB-209901-")));
-    attempt(c.code(), "staff", TestCompanies.PASSWORD).andExpect(jsonPath("$.billing").value((Object) null));
+    full(c.code(), "staff", TestCompanies.PASSWORD).andExpect(jsonPath("$.billing").value((Object) null));
   }
 
   @Test

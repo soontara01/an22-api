@@ -9,7 +9,7 @@ import com.an22.api.db.ActorDao;
 import com.an22.api.db.TxActor;
 import com.an22.api.mail.Mailer;
 import com.an22.api.model.BranchPayload;
-import com.an22.api.model.LoginResponse;
+import com.an22.api.model.MfaChallenge;
 import com.an22.api.model.SignupPayload;
 import com.an22.api.model.User;
 import com.an22.api.rules.CompanyRules;
@@ -51,9 +51,11 @@ class AccountTx {
   private final Mailer mailer;
   private final String baseUrl;
   private final Clock clock;
+  private final MfaService mfa;
 
   AccountTx(AccountDao dao, SessionDao sessionDao, SessionService sessions, AuditDao audit, ActorDao actors, PasswordEncoder passwords,
-      JwtService jwt, PiiCipher cipher, Mailer mailer, ApiProperties props, Clock clock) {
+      JwtService jwt, PiiCipher cipher, Mailer mailer, ApiProperties props, Clock clock,
+      MfaService mfa) {
     this.dao = dao;
     this.sessionDao = sessionDao;
     this.sessions = sessions;
@@ -65,11 +67,12 @@ class AccountTx {
     this.mailer = mailer;
     this.baseUrl = props.app().baseUrl().replaceAll("/+$", "");
     this.clock = clock;
+    this.mfa = mfa;
   }
 
   /** {@link AccountService#signup} หลังนับครั้งแล้ว. */
   @Transactional("platformTx")
-  public LoginResponse signup(SignupPayload in) {
+  public MfaChallenge signup(SignupPayload in) {
     SignupPayload p = SignupRules.normalize(in);
     String problem = SignupRules.signupError(p);
     if (problem != null) {
@@ -98,9 +101,8 @@ class AccountTx {
     User owner = sessionDao.userById(Via.PLATFORM, companyId, ownerId).orElseThrow().user();
     audit.insertOnPlatform(new AuditEntry(companyId, "user", ownerId, owner.name(), null, null, "signup", "company", companyId, code,
         "สมัครใช้งาน แพ็กเกจ " + PlanRules.planOf(p.planId()).name() + " ทดลองใช้ถึง " + trialEndsOn));
-    ShopSession session = SessionService.of(c, owner, sessionDao.branches(Via.PLATFORM, companyId), null);
-    String token = jwt.issueShop(companyId, ownerId, owner.role(), owner.allBranches(), owner.branchIds());
-    return new LoginResponse(token, SessionService.toSession(session, sessions.billing(session, Via.PLATFORM)));
+    // เข้าระบบได้หลังผูก Microsoft Authenticator เท่านั้น (E57) — ขั้นรหัสเหมือน login
+    return mfa.challenge(Via.PLATFORM, c.id(), c.code(), owner);
   }
 
   /** {@link AccountService#forgotPassword} หลังนับครั้งแล้ว: {@code code} / {@code wanted} normalize แล้ว — ไม่ตรง = ไม่ทำอะไร. */

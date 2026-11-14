@@ -324,8 +324,6 @@ export const tables = {
       shift_variance_limit: 'ส่วนต่างตอนปิดกะต่อช่องทางที่เกินนี้ (บาท) ต้องให้ admin อนุมัติ',
       shift_max_hours: 'เปิดกะนานเกินกี่ชั่วโมงให้เตือน (เตือนอย่างเดียว)',
       staff_see_cost: 'ให้ role user เห็นต้นทุน / กำไร (ค่าเริ่ม false — API ใส่ null ในทุกช่องทุนของ response) (E43)',
-      mfa_required:
-        'ใครต้อง login ด้วยรหัส Microsoft Authenticator (E55): `none` ไม่บังคับ (ผู้ใช้เลือกเอง) · `admins` owner + admin · `all` ทุกคน — มีผลตั้งแต่ login ครั้งถัดไป',
     },
   },
   dt_branches: {
@@ -385,11 +383,11 @@ export const tables = {
   dt_user_mfa: {
     title: 'Microsoft Authenticator ของผู้ใช้',
     purpose:
-      'login สองขั้น (E55): secret TOTP (RFC 6238) ของผู้ใช้ที่ผูกแอป Microsoft Authenticator — ผู้ใช้ที่มีแถวที่ยืนยันแล้ว (`User.mfaEnabled`) ต้องใส่รหัส 6 หลักทุกครั้งหลังรหัสผ่าน ไม่ว่าเข้าทาง `/auth/login` หรือ `/auth/login-mfa`',
+      'login สองขั้น (E55 / E57): ผู้ใช้ร้านทุกคนต้องใส่รหัส 6 หลักจากแอป Microsoft Authenticator ทุกครั้งหลังรหัสผ่าน — ตารางนี้เก็บ secret TOTP (RFC 6238) ของแต่ละคน (`User.mfaEnabled` = มีแถวที่ยืนยันแล้ว)',
     lifecycle: [
-      'สร้าง (รอยืนยัน `confirmed_at` null): login ทาง `/auth/login-mfa` / บริษัทบังคับ แต่ยังไม่ผูก หรือกดเปิดใช้ในหน้าตั้งค่า (`POST /me/mfa/setup`) — ลองใหม่ได้ secret เดิมจนกว่าจะยืนยัน',
-      'ยืนยัน: รหัสแรกที่ถูก (`POST /auth/mfa/verify` หรือ `/me/mfa/confirm`) ตั้ง `confirmed_at`; ทุกครั้งที่ใช้รหัสตั้ง `last_step`',
-      'ลบ: ผู้ใช้ปิดเอง (`POST /me/mfa/disable` + รหัสผ่าน, ถ้าบริษัทไม่บังคับ), admin ล้างให้เมื่อมือถือหาย (`DELETE /users/:id/mfa`), ลบผู้ใช้',
+      'สร้าง (รอยืนยัน `confirmed_at` null): login หรือสมัครใช้งานครั้งแรกที่ยังไม่ผูก — ลองใหม่ได้ secret เดิมจนกว่าจะยืนยัน',
+      'ยืนยัน: รหัสแรกที่ถูก (`POST /auth/mfa/verify`) ตั้ง `confirmed_at`; ทุกครั้งที่ใช้รหัสตั้ง `last_step`',
+      'ลบ: admin ล้างให้เมื่อมือถือหาย (`DELETE /users/:id/mfa` — ผูกใหม่ตอน login ครั้งถัดไป), ลบผู้ใช้; ผู้ใช้ปิดเองไม่ได้ (E57)',
     ],
     rules: [
       '1 แถวต่อผู้ใช้ (PK tenant + user)',
@@ -1202,7 +1200,7 @@ export const flows = [
       {
         table: 'dt_user_mfa',
         op: 'U',
-        text: 'ต้องใช้รหัส Authenticator (E55: `/auth/login-mfa`, ผู้ใช้เปิดใช้แล้ว หรือบริษัทบังคับ) → ยังไม่ออก token: ตอบ challenge (JWT aud=mfa 5 นาที) + secret ใหม่ที่รอยืนยันถ้ายังไม่ผูก; `POST /auth/mfa/verify` ตรวจรหัส ตั้ง `confirmed_at` / `last_step` แล้วจึง audit `login` + ออก token (ผิด = `login_failed` นับในตัวนับเดียวกับรหัสผ่าน)',
+        text: 'รหัสผ่านถูก → ขั้นรหัส Authenticator เสมอ (E57) ยังไม่ออก token: ตอบ challenge (JWT aud=mfa 5 นาที) + secret ใหม่ที่รอยืนยันถ้ายังไม่ผูก; `POST /auth/mfa/verify` ตรวจรหัส ตั้ง `confirmed_at` / `last_step` แล้วจึง audit `login` + ออก token (ผิด = `login_failed` นับในตัวนับเดียวกับรหัสผ่าน)',
       },
       { table: 'dt_billing_invoices', op: 'I', text: '`BillingService.catchUp` ออกใบแจ้งหนี้ที่ถึงรอบ / ระงับบริษัทที่ค้างเกินกำหนด (ดูหัวข้อ billing)' },
       { table: ['dt_branches', 'dt_pos_terminals', 'dt_company_info'], op: 'R', text: 'สาขาที่เข้าได้ + ข้อมูลของ session (`GET /me` อ่านชุดเดียวกันทุกครั้งที่โหลดหน้า)' },

@@ -254,4 +254,16 @@ call POST /platform/auth/login '{"username":"platform","password":"platform"}'
 expect_json '.mfa' "verify"
 expect_json 'has("setup")' "false"
 
+case_id 3.15 "ร้าน: รหัสผ่านถูกยังไม่ได้ token — ต้องผ่านรหัส Microsoft Authenticator เสมอ (E57)"
+as -
+E2E_RAW_LOGIN=1 call POST /auth/login "{\"companyCode\":\"$CODE\",\"username\":\"cash1\",\"password\":\"pass1234\"}"
+expect_status 200
+expect_json 'has("token")' "false"
+expect_json '.mfa | IN("setup", "verify")' "true"
+call POST /auth/mfa/verify '{"code":"123456"}'
+expect_status 400
+expect_msg "หมดเวลายืนยันรหัส กรุณาเข้าสู่ระบบใหม่"
+login "$CODE" cash1 pass1234
+check "login ครบสองขั้นได้ token" true "$([[ -n "$TOKEN" ]] && echo true || echo false)"
+
 finish
