@@ -605,6 +605,17 @@ CSRF กันที่ web ด้วย `XSRF-TOKEN` / `X-XSRF-TOKEN` (ขั�
   (เข้าระบบได้หลังผูกเท่านั้น); ตัด `/me/mfa/*` (ผูกตอน login เท่านั้น, ปิดเองไม่ได้); `DELETE /users/{id}/mfa` คงไว้ (มือถือหาย)
 - test: `ApiTest.login()` / `passBothSteps()` ล้าง Authenticator ของผู้ใช้แล้วผ่านสองขั้น; e2e `call()` ทำขั้นรหัสแทนเมื่อ login / signup (case 3.15)
 
+### ขั้น 17 — เปลี่ยนเครื่อง Authenticator เอง + platform ล้างให้ผู้ใช้ร้าน (E58, 2026-11-14)
+- `POST /me/mfa/change { password, code }` (`OwnMfaService`): รหัสผ่าน (นับใน `LoginThrottle` แบบ `auth/verify`) → ยังไม่ผูก → รหัสของเครื่องเดิม
+  (ช่วงที่ใช้แล้วไม่รับ, นับผิดในตัวนับบัญชีเดียวกับ login) → `MfaChange { change, setup }`: `change` = JWT aud `mfa-change` 10 นาที, secret ใหม่
+  เข้ารหัส PiiCipher (AAD `mfa_change.secret:<tenant>`) อยู่ใน claim — ยังไม่บันทึก, เครื่องเดิมใช้ได้ต่อ
+- `POST /me/mfa/change/confirm { change, code }`: `change` ต้องเป็นของผู้ใช้ใน session; รหัสแรกของเครื่องใหม่ถูก → `MfaDao.replace()`; ส่งซ้ำ
+  (secret นี้ใช้อยู่แล้ว) / ถูกล้างไประหว่างนั้น → 400 "หมดเวลาเปลี่ยนเครื่อง กรุณาเริ่มใหม่"; audit `mfa_enable` "เปลี่ยนเครื่องจากหน้าตั้งค่า"
+- `POST /platform/companies/{id}/mfa-reset { username }` → body ว่าง: ไม่มีชื่อ → 400 "ไม่พบชื่อผู้ใช้นี้ในบริษัท", ยังไม่ผูก → 400; audit `mfa_reset`
+  `actorKind: platform` "ผู้ให้บริการล้าง Microsoft Authenticator ให้" — owner ทำมือถือหายและไม่มีผู้ดูแลระดับบริษัทคนอื่น
+- `RequestLogFilter`: ไม่ log body ของ `/me/mfa/**` (รหัส 6 หลัก + change)
+- ไม่มี migration · test: `MfaLoginIT` (เปลี่ยนเครื่อง), `PlatformCompanyIT` (ล้างให้)
+
 ## เรื่องที่ต้องถามผู้ใช้ระหว่างทาง (ไม่เดา)
 
 1. ~~ขั้น 2: จำกัด login ผิดต่อบัญชี / IP~~ — ตอบแล้ว 2026-10-22 (ขั้น 2)

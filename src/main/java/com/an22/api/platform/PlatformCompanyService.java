@@ -2,12 +2,15 @@ package com.an22.api.platform;
 
 import com.an22.api.audit.AuditDao;
 import com.an22.api.audit.AuditEntry;
+import com.an22.api.auth.MfaDao;
+import com.an22.api.auth.SessionDao.Via;
 import com.an22.api.model.BillingInvoice;
 import com.an22.api.model.PlatformAdmin;
 import com.an22.api.model.PlatformCompany;
 import com.an22.api.platform.PlatformCompanyDao.CompanyRecord;
 import com.an22.api.rules.AuditRules;
 import com.an22.api.rules.CompanyDataRules;
+import com.an22.api.rules.MfaRules;
 import com.an22.api.rules.PlanRules;
 import com.an22.api.rules.PlatformRules;
 import com.an22.api.rules.SubscriptionRules;
@@ -39,12 +42,14 @@ public class PlatformCompanyService {
   private final PlatformCompanyDao dao;
   private final AuditDao audit;
   private final PasswordEncoder passwords;
+  private final MfaDao mfa;
   private final Clock clock;
 
-  PlatformCompanyService(PlatformCompanyDao dao, AuditDao audit, PasswordEncoder passwords, Clock clock) {
+  PlatformCompanyService(PlatformCompanyDao dao, AuditDao audit, PasswordEncoder passwords, MfaDao mfa, Clock clock) {
     this.dao = dao;
     this.audit = audit;
     this.passwords = passwords;
+    this.mfa = mfa;
     this.clock = clock;
   }
 
@@ -103,6 +108,23 @@ public class PlatformCompanyService {
     PlatformCompany.Owner owner = dao.owner(id).orElseThrow(() -> ApiException.badRequest("บริษัทนี้ไม่มีเจ้าของบริษัท"));
     dao.setOwnerPassword(id, owner.id(), passwords.encode(password));
     record(admin, c, "user_password", "user", owner.id(), owner.username(), "ผู้ให้บริการตั้งรหัสผ่านใหม่ให้เจ้าของบริษัท");
+  }
+
+  /**
+   * {@code POST /platform/companies/:id/mfa-reset { username }} (E58): ล้าง Authenticator ของผู้ใช้ร้าน (เช่น owner ทำมือถือหายและไม่มี
+   * ผู้ดูแลระดับบริษัทคนอื่น) — ผูกใหม่ตอน login ครั้งถัดไป.
+   */
+  @Transactional("platformTx")
+  public void resetUserMfa(PlatformAdmin admin, long id, String usernameIn) {
+    CompanyRecord c = writable(id);
+    String username = UserRules.normalizeUsername(usernameIn == null ? "" : usernameIn);
+    PlatformCompany.Owner user = dao.userByUsername(id, username).orElseThrow(() -> ApiException.badRequest(MfaRules.USER_NOT_FOUND));
+    boolean on = mfa.find(Via.PLATFORM, id, user.id()).filter(MfaDao.Row::confirmed).isPresent();
+    if (!on) {
+      throw ApiException.badRequest(MfaRules.NOT_SET);
+    }
+    mfa.delete(Via.PLATFORM, id, user.id());
+    record(admin, c, "mfa_reset", "user", user.id(), user.username(), "ผู้ให้บริการล้าง Microsoft Authenticator ให้");
   }
 
   /**

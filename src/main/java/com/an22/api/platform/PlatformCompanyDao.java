@@ -88,6 +88,15 @@ public class PlatformCompanyDao {
         .optional();
   }
 
+  /** E58: ผู้ใช้ของบริษัทตามชื่อผู้ใช้ (ตัวเล็กแล้ว) — id + username. */
+  public Optional<PlatformCompany.Owner> userByUsername(long companyId, String username) {
+    return jdbc.sql("SELECT id, name, username, email FROM dt_users WHERE tenant_id = :t AND username = :u")
+        .param("t", companyId)
+        .param("u", username)
+        .query((rs, i) -> new PlatformCompany.Owner(rs.getLong("id"), rs.getString("name"), rs.getString("username"), rs.getString("email")))
+        .optional();
+  }
+
   public void setOwnerPassword(long companyId, long userId, String hash) {
     jdbc.sql("UPDATE dt_users SET password_hash = :h WHERE tenant_id = :t AND id = :id")
         .param("h", hash).param("t", companyId).param("id", userId).update();

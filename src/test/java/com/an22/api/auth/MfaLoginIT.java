@@ -164,6 +164,47 @@ class MfaLoginIT extends ApiTest {
   }
 
   @Test
+  void movesOwnAuthenticatorToANewPhoneWithThePasswordAndTheOldPhone() throws Exception {
+    String staff = login(c.code(), "staff", TestCompanies.PASSWORD);
+    String old = enrol("staff");
+    var start = post("/me/mfa/change");
+    mvc.perform(as(staff, start, Map.of("password", "nope", "code", TotpRules.code(old, enrolStep + 1))))
+        .andExpect(status().isBadRequest()).andExpect(content().json(message("รหัสผ่านไม่ถูกต้อง")));
+    mvc.perform(as(staff, post("/me/mfa/change"), Map.of("password", TestCompanies.PASSWORD, "code", "000000")))
+        .andExpect(status().isBadRequest()).andExpect(content().json(message(WRONG_CODE)));
+    JsonNode change = json(mvc.perform(as(staff, post("/me/mfa/change"),
+            Map.of("password", TestCompanies.PASSWORD, "code", TotpRules.code(old, enrolStep + 1))))
+        .andExpect(status().isOk()));
+    String fresh = change.path("setup").path("secret").asString();
+    String proof = change.path("change").asString();
+    assertThat(fresh).matches("[A-Z2-7]{32}").isNotEqualTo(old);
+    assertThat(change.path("setup").path("otpauthUrl").asString()).contains("AN22%3A" + c.code() + "%3Astaff");
+    // หลักฐานใช้แทน token / challenge ไม่ได้ และกลับกัน
+    mvc.perform(as(proof, get("/me"))).andExpect(status().isUnauthorized());
+    String newCode = codeNow(fresh, 0);
+    mvc.perform(as(staff, post("/me/mfa/change/confirm"), Map.of("change", staff, "code", newCode)))
+        .andExpect(status().isBadRequest()).andExpect(content().json(message("หมดเวลาเปลี่ยนเครื่อง กรุณาเริ่มใหม่")));
+    // ของคนอื่นใช้ไม่ได้
+    String boss = login(c.code(), "boss", TestCompanies.PASSWORD);
+    mvc.perform(as(boss, post("/me/mfa/change/confirm"), Map.of("change", proof, "code", newCode)))
+        .andExpect(status().isBadRequest()).andExpect(content().json(message("หมดเวลาเปลี่ยนเครื่อง กรุณาเริ่มใหม่")));
+    mvc.perform(as(staff, post("/me/mfa/change/confirm"), Map.of("change", proof, "code", "000000")))
+        .andExpect(status().isBadRequest()).andExpect(content().json(message(WRONG_CODE)));
+    mvc.perform(as(staff, post("/me/mfa/change/confirm"), Map.of("change", proof, "code", newCode)))
+        .andExpect(status().isOk()).andExpect(jsonPath("$.mfaEnabled").value(true));
+    // ส่งซ้ำ = ใช้ไปแล้ว
+    mvc.perform(as(staff, post("/me/mfa/change/confirm"), Map.of("change", proof, "code", newCode)))
+        .andExpect(status().isBadRequest()).andExpect(content().json(message("หมดเวลาเปลี่ยนเครื่อง กรุณาเริ่มใหม่")));
+    assertThat(companies.audit(c, "mfa_enable")).contains("mfa_enable|staff|เปลี่ยนเครื่องจากหน้าตั้งค่า");
+
+    // เครื่องเดิมใช้ไม่ได้อีก เครื่องใหม่ใช้ได้
+    long next = TotpRules.step(System.currentTimeMillis()) + 1;
+    String challenge = json(loginAttempt("staff").andExpect(jsonPath("$.mfa").value("verify"))).path("challenge").asString();
+    verify(challenge, TotpRules.code(old, next)).andExpect(status().isBadRequest());
+    verify(challenge, TotpRules.code(fresh, next)).andExpect(status().isOk());
+  }
+
+  @Test
   void secretsNeverLeaveInTheCompanyExport() throws Exception {
     enrol("staff");
     String owner = login(c.code(), "owner", TestCompanies.PASSWORD);
