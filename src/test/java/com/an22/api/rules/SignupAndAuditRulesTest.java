@@ -75,7 +75,7 @@ class SignupAndAuditRulesTest {
     assertThat(AuditRules.parseAuditQuery("2026-02-30", null, null, "2.0", "1d").from()).isNull();
     assertThat(AuditRules.parseAuditQuery(null, null, null, "2.0", "1d"))
         .isEqualTo(new AuditRules.Query(null, null, null, 2L, null));
-    assertThat(AuditRules.ACTIONS).hasSize(31);
+    assertThat(AuditRules.ACTIONS).hasSize(34);
     // แบบ Number(): exponent / ทศนิยม .0 / เครื่องหมาย ได้; ไม่ใช่จำนวนเต็ม / ยาวเกิน / เกิน MAX_SAFE_INTEGER = ไม่กรอง
     assertThat(AuditRules.parseAuditQuery(null, null, null, " +1e2 ", "-0").userId()).isEqualTo(100L);
     assertThat(AuditRules.parseAuditQuery(null, null, null, null, "-0").branchId()).isZero();

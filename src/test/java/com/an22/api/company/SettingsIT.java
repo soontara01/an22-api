@@ -59,7 +59,7 @@ class SettingsIT extends ApiTest {
         .andExpect(content().json(
             "{\"name\":\"บริษัท ไอทีดี คอมพิวเตอร์ จำกัด\",\"taxId\":\"0105550123451\",\"vatRegistered\":true,\"taxInvoicePaper\":\"A4\","
                 + "\"exchangeDays\":7,\"manualDiscountMaxPercent\":5,\"requireShift\":true,\"shiftVarianceLimit\":100,"
-                + "\"shiftMaxHours\":12,\"staffSeeCost\":false}", true));
+                + "\"shiftMaxHours\":12,\"staffSeeCost\":false,\"mfaRequired\":\"none\"}", true));
   }
 
   @Test

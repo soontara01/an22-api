@@ -28,7 +28,7 @@ export const domains = [
     soft: '#e8efff',
     intro:
       'ข้อมูลระดับบริษัทที่ทุกเมนูใช้: ข้อมูลผู้ขายบนเอกสาร + กติกาที่ทุกสาขาใช้ร่วม, สาขา (1 สาขา = 1 คลังสินค้า = 1 สถานประกอบการ), ผู้ใช้และสาขาที่เข้าได้, เมนูของพนักงาน, เครื่อง POS, ตัวนับเลขเอกสาร และบันทึกการใช้งาน',
-    tables: ['dt_company_info', 'dt_branches', 'dt_users', 'dt_user_branches', 'dt_menu_access', 'dt_pos_terminals', 'dt_doc_counters', 'dt_audit_log'],
+    tables: ['dt_company_info', 'dt_branches', 'dt_users', 'dt_user_branches', 'dt_user_mfa', 'dt_menu_access', 'dt_pos_terminals', 'dt_doc_counters', 'dt_audit_log'],
   },
   {
     id: 'C',
@@ -304,6 +304,8 @@ export const tables = {
       shift_variance_limit: 'ส่วนต่างตอนปิดกะต่อช่องทางที่เกินนี้ (บาท) ต้องให้ admin อนุมัติ',
       shift_max_hours: 'เปิดกะนานเกินกี่ชั่วโมงให้เตือน (เตือนอย่างเดียว)',
       staff_see_cost: 'ให้ role user เห็นต้นทุน / กำไร (ค่าเริ่ม false — API ใส่ null ในทุกช่องทุนของ response) (E43)',
+      mfa_required:
+        'ใครต้อง login ด้วยรหัส Microsoft Authenticator (E55): `none` ไม่บังคับ (ผู้ใช้เลือกเอง) · `admins` owner + admin · `all` ทุกคน — มีผลตั้งแต่ login ครั้งถัดไป',
     },
   },
   dt_branches: {
@@ -359,6 +361,28 @@ export const tables = {
     lifecycle: ['เขียนใหม่ทั้งชุดทุกครั้งที่บันทึกผู้ใช้ (ลบของเดิมแล้ว insert)', 'ว่างเมื่อผู้ใช้เป็น all_branches (E9)'],
     rules: ['PK (tenant, user, branch)'],
     columns: { tenant_id: TENANT, user_id: 'ผู้ใช้ → `dt_users`', branch_id: 'สาขาที่เข้าได้ → `dt_branches`' },
+  },
+  dt_user_mfa: {
+    title: 'Microsoft Authenticator ของผู้ใช้',
+    purpose:
+      'login สองขั้น (E55): secret TOTP (RFC 6238) ของผู้ใช้ที่ผูกแอป Microsoft Authenticator — ผู้ใช้ที่มีแถวที่ยืนยันแล้ว (`User.mfaEnabled`) ต้องใส่รหัส 6 หลักทุกครั้งหลังรหัสผ่าน ไม่ว่าเข้าทาง `/auth/login` หรือ `/auth/login-mfa`',
+    lifecycle: [
+      'สร้าง (รอยืนยัน `confirmed_at` null): login ทาง `/auth/login-mfa` / บริษัทบังคับ แต่ยังไม่ผูก หรือกดเปิดใช้ในหน้าตั้งค่า (`POST /me/mfa/setup`) — ลองใหม่ได้ secret เดิมจนกว่าจะยืนยัน',
+      'ยืนยัน: รหัสแรกที่ถูก (`POST /auth/mfa/verify` หรือ `/me/mfa/confirm`) ตั้ง `confirmed_at`; ทุกครั้งที่ใช้รหัสตั้ง `last_step`',
+      'ลบ: ผู้ใช้ปิดเอง (`POST /me/mfa/disable` + รหัสผ่าน, ถ้าบริษัทไม่บังคับ), admin ล้างให้เมื่อมือถือหาย (`DELETE /users/:id/mfa`), ลบผู้ใช้',
+    ],
+    rules: [
+      '1 แถวต่อผู้ใช้ (PK tenant + user)',
+      'รับรหัสของช่วง 30 วินาทีปัจจุบัน ±1 ช่วง และต้องมากกว่า `last_step` (UPDATE … WHERE last_step < :step — รหัสเดิมใช้ซ้ำไม่ได้แม้ส่งพร้อมกัน)',
+      'ไม่อยู่ใน `GET /company/export` (`CompanyExportDao.SKIP`) — secret ไม่เคยออกนอก api หลังยืนยัน',
+    ],
+    columns: {
+      tenant_id: TENANT,
+      user_id: 'ผู้ใช้ → `dt_users`',
+      secret_enc: 'secret base32 (20 byte) เข้ารหัส AES-GCM ด้วย `PiiCipher` (AAD `dt_user_mfa.secret:<tenant>`)',
+      confirmed_at: 'เวลาที่ยืนยันด้วยรหัสแรก — null = ผูกยังไม่เสร็จ (ยังไม่นับว่าเปิดใช้)',
+      last_step: 'ช่วง 30 วินาที (unix time / 30) ของรหัสที่ใช้ล่าสุด — กันใช้รหัสซ้ำ',
+    },
   },
   dt_menu_access: {
     title: 'เมนูที่พนักงาน (role user) เห็น',
@@ -1155,6 +1179,11 @@ export const flows = [
       { table: ['dt_companies', 'dt_users'], op: 'R', text: 'หาบริษัทจากรหัส แล้วผู้ใช้จาก username — ไม่เจอก็ยังตรวจกับ hash หลอก (เวลาตอบเท่ากัน)' },
       { table: 'dt_login_throttle', op: 'U', text: 'ผิด → นับผิด (ครบเพดานตั้ง locked_until); ถูก → ลบแถวของบัญชี' },
       { table: 'dt_audit_log', op: 'I', text: '`login` หรือ `login_failed` (บันทึกแม้ request ล้ม)' },
+      {
+        table: 'dt_user_mfa',
+        op: 'U',
+        text: 'ต้องใช้รหัส Authenticator (E55: `/auth/login-mfa`, ผู้ใช้เปิดใช้แล้ว หรือบริษัทบังคับ) → ยังไม่ออก token: ตอบ challenge (JWT aud=mfa 5 นาที) + secret ใหม่ที่รอยืนยันถ้ายังไม่ผูก; `POST /auth/mfa/verify` ตรวจรหัส ตั้ง `confirmed_at` / `last_step` แล้วจึง audit `login` + ออก token (ผิด = `login_failed` นับในตัวนับเดียวกับรหัสผ่าน)',
+      },
       { table: 'dt_billing_invoices', op: 'I', text: '`BillingService.catchUp` ออกใบแจ้งหนี้ที่ถึงรอบ / ระงับบริษัทที่ค้างเกินกำหนด (ดูหัวข้อ billing)' },
       { table: ['dt_branches', 'dt_pos_terminals', 'dt_company_info'], op: 'R', text: 'สาขาที่เข้าได้ + ข้อมูลของ session (`GET /me` อ่านชุดเดียวกันทุกครั้งที่โหลดหน้า)' },
     ],

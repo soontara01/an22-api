@@ -18,7 +18,7 @@ public class CompanyInfoDao {
   public CompanyInfo get() {
     return jdbc.sql(
             "SELECT name, tax_id, vat_registered, tax_invoice_paper, exchange_days, manual_discount_max_percent,"
-                + " require_shift, shift_variance_limit, shift_max_hours, staff_see_cost FROM dt_company_info")
+                + " require_shift, shift_variance_limit, shift_max_hours, staff_see_cost, mfa_required FROM dt_company_info")
         .query((rs, i) -> new CompanyInfo(
             rs.getString("name"),
             rs.getString("tax_id"),
@@ -29,7 +29,8 @@ public class CompanyInfoDao {
             rs.getBoolean("require_shift"),
             plain(rs.getBigDecimal("shift_variance_limit")),
             BigDecimal.valueOf(rs.getInt("shift_max_hours")),
-            rs.getBoolean("staff_see_cost")))
+            rs.getBoolean("staff_see_cost"),
+            rs.getString("mfa_required")))
         .single();
   }
 
@@ -38,7 +39,7 @@ public class CompanyInfoDao {
     jdbc.sql(
             "UPDATE dt_company_info SET name = :name, tax_id = :tax, vat_registered = :vat, tax_invoice_paper = :paper,"
                 + " exchange_days = :days, manual_discount_max_percent = :pct, require_shift = :shift,"
-                + " shift_variance_limit = :variance, shift_max_hours = :hours, staff_see_cost = :cost")
+                + " shift_variance_limit = :variance, shift_max_hours = :hours, staff_see_cost = :cost, mfa_required = :mfa")
         .param("name", c.name())
         .param("tax", c.taxId())
         .param("vat", c.vatRegistered())
@@ -49,6 +50,7 @@ public class CompanyInfoDao {
         .param("variance", c.shiftVarianceLimit())
         .param("hours", c.shiftMaxHours().intValueExact())
         .param("cost", c.staffSeeCost())
+        .param("mfa", c.mfaRequired())
         .update();
   }
 

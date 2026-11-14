@@ -9,7 +9,7 @@ import org.springframework.stereotype.Repository;
 public class CompanyExportDao {
 
   /** ตารางที่เป็นการนับภายในของระบบ ไม่ใช่ข้อมูลของบริษัท. */
-  private static final List<String> SKIP = List.of("dt_doc_counters");
+  private static final List<String> SKIP = List.of("dt_doc_counters", "dt_user_mfa");
 
   private final JdbcClient jdbc;
 

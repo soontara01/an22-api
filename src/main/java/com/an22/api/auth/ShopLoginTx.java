@@ -8,7 +8,9 @@ import com.an22.api.auth.SessionDao.Via;
 import com.an22.api.db.ActorDao;
 import com.an22.api.db.TxActor;
 import com.an22.api.model.LoginResponse;
+import com.an22.api.model.LoginResult;
 import com.an22.api.model.User;
+import com.an22.api.rules.MfaRules;
 import com.an22.api.rules.UserRules;
 import com.an22.api.security.JwtService;
 import com.an22.api.web.ApiException;
@@ -33,16 +35,25 @@ class ShopLoginTx {
   private final ActorDao actors;
   private final PasswordEncoder passwords;
   private final JwtService jwt;
+  private final MfaService mfa;
   /** hash ที่ไม่ตรงกับอะไรเลย — ตรวจเมื่อไม่มีผู้ใช้ เวลาตอบจะได้ไม่บอกว่าชื่อนี้มีอยู่. */
   private final String dummyHash;
 
-  ShopLoginTx(SessionDao dao, SessionService sessions, AuditDao audit, ActorDao actors, PasswordEncoder passwords, JwtService jwt) {
+  ShopLoginTx(
+      SessionDao dao,
+      SessionService sessions,
+      AuditDao audit,
+      ActorDao actors,
+      PasswordEncoder passwords,
+      JwtService jwt,
+      MfaService mfa) {
     this.dao = dao;
     this.sessions = sessions;
     this.audit = audit;
     this.actors = actors;
     this.passwords = passwords;
     this.jwt = jwt;
+    this.mfa = mfa;
     this.dummyHash = passwords.encode(UUID.randomUUID().toString());
   }
 
@@ -56,6 +67,18 @@ class ShopLoginTx {
     }
   }
 
+  /** บริษัท + ชื่อผู้ใช้ของ challenge (E55) — ตัวนับผิดของบัญชีเดียวกับ login; ไม่มี / ผู้ใช้ปิด = empty. */
+  record Who(String companyCode, String username) {}
+
+  @Transactional(value = "platformTx", readOnly = true)
+  public Optional<Who> who(long tenantId, long userId) {
+    Optional<CompanyRow> company = dao.company(Via.PLATFORM, tenantId);
+    Optional<User> user = dao.userById(Via.PLATFORM, tenantId, userId).map(UserRow::user).filter(User::active);
+    return company.isEmpty() || user.isEmpty()
+        ? Optional.empty()
+        : Optional.of(new Who(company.get().code(), user.get().username()));
+  }
+
   /** id ของบริษัทที่รหัสนี้ (ให้ {@link AuthService#login} เรียก billing catch-up ใน transaction ของมันเองก่อน {@link #attempt}). */
   @Transactional(value = "platformTx", readOnly = true)
   public Optional<Long> companyId(String code) {
@@ -64,9 +87,10 @@ class ShopLoginTx {
 
   /**
    * {@code code} / {@code username} normalize แล้ว — billing catch-up ทำแล้ว (ผู้เรียก). ผิด → {@link Rejected}; รหัสถูกแต่บริษัทถูกระงับ → 401 ข้อความตามเหตุ (ไม่นับผิด ไม่ล้างตัวนับ).
+   * ต้องใช้รหัส Authenticator ({@code loginNeedsMfa()}, E55) → {@link com.an22.api.model.MfaChallenge} ยังไม่ออก token / ไม่ audit {@code login}.
    */
   @Transactional("platformTx")
-  public LoginResponse attempt(String code, String username, String password) {
+  public LoginResult attempt(String code, String username, String password, boolean askedMfa) {
     Optional<CompanyRow> company = code.isEmpty() ? Optional.empty() : dao.companyByCode(Via.PLATFORM, code);
     if (company.isEmpty()) {
       passwords.matches(String.valueOf(password), dummyHash);
@@ -85,7 +109,41 @@ class ShopLoginTx {
           AuthService.SUSPENDED_MESSAGE.getOrDefault(c.suspendedReason(), AuthService.SUSPENDED_MESSAGE.get("platform")));
     }
     actors.becomeOnPlatform(TxActor.user(c.id(), u.id()));
-    audit.insertOnPlatform(AuditEntry.ofUser(c.id(), u.id(), u.name(), null, "login", ""));
+    if (MfaRules.loginNeedsMfa(u.role(), u.mfaEnabled(), c.mfaRequired(), askedMfa)) {
+      return mfa.challenge(Via.PLATFORM, c.id(), c.code(), u);
+    }
+    return session(c, u, "");
+  }
+
+  /**
+   * ขั้นรหัสของ login (E55): บริษัท / ผู้ใช้ของ challenge (ไม่มี / ปิด → 400 หมดเวลา), บริษัทถูกระงับ → 401 เหมือน login, รหัสผิด / ใช้แล้ว →
+   * {@link Rejected} (audit {@code login_failed}); ถูก → เปิดใช้ถ้าเพิ่งผูก (audit {@code mfa_enable}) แล้ว session + token.
+   */
+  @Transactional("platformTx")
+  public LoginResponse verifyMfa(long tenantId, long userId, String code) {
+    CompanyRow c = dao.company(Via.PLATFORM, tenantId).orElseThrow(() -> ApiException.badRequest(MfaRules.CHALLENGE_EXPIRED));
+    User u = dao.userById(Via.PLATFORM, tenantId, userId).map(UserRow::user).filter(User::active)
+        .orElseThrow(() -> ApiException.badRequest(MfaRules.CHALLENGE_EXPIRED));
+    boolean ownerDeleting = "deletion".equals(c.suspendedReason()) && UserRules.isOwner(u.role());
+    if (!c.active() && !ownerDeleting) {
+      throw new ApiException(HttpStatus.UNAUTHORIZED,
+          AuthService.SUSPENDED_MESSAGE.getOrDefault(c.suspendedReason(), AuthService.SUSPENDED_MESSAGE.get("platform")));
+    }
+    actors.becomeOnPlatform(TxActor.user(c.id(), u.id()));
+    if (!mfa.use(Via.PLATFORM, c.id(), u.id(), code)) {
+      throw new Rejected(AuditEntry.ofUser(c.id(), u.id(), u.name(), null, "login_failed", "รหัส Microsoft Authenticator ไม่ถูกต้อง"));
+    }
+    if (!u.mfaEnabled()) {
+      audit.insertOnPlatform(new AuditEntry(c.id(), "user", u.id(), u.name(), null, null, "mfa_enable", "user", u.id(), u.username(),
+          "ผูกตอนเข้าสู่ระบบ"));
+    }
+    User now = dao.userById(Via.PLATFORM, tenantId, userId).map(UserRow::user).orElse(u);
+    return session(c, now, "ด้วย Microsoft Authenticator");
+  }
+
+  /** audit {@code login} แล้วออก session + token. */
+  private LoginResponse session(CompanyRow c, User u, String detail) {
+    audit.insertOnPlatform(AuditEntry.ofUser(c.id(), u.id(), u.name(), null, "login", detail));
     ShopSession session = SessionService.of(c, u, dao.branches(Via.PLATFORM, c.id()), null);
     String token = jwt.issueShop(c.id(), u.id(), u.role(), u.allBranches(), u.branchIds());
     return new LoginResponse(token, SessionService.toSession(session, sessions.billing(session, Via.PLATFORM)));

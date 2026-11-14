@@ -16,7 +16,9 @@ public class UserDao {
   public static final String SELECT =
       "SELECT u.id, u.username, u.name, u.email, u.role, u.active, u.all_branches, u.created_at, u.password_hash,"
           + " ARRAY(SELECT b.branch_id FROM dt_user_branches b WHERE b.tenant_id = u.tenant_id AND b.user_id = u.id"
-          + "       ORDER BY b.branch_id) AS branch_ids"
+          + "       ORDER BY b.branch_id) AS branch_ids,"
+          + " EXISTS (SELECT 1 FROM dt_user_mfa m WHERE m.tenant_id = u.tenant_id AND m.user_id = u.id"
+          + "         AND m.confirmed_at IS NOT NULL) AS mfa_enabled"
           + " FROM dt_users u";
 
   private final JdbcClient jdbc;
@@ -77,6 +79,7 @@ public class UserDao {
 
   public void delete(long id) {
     jdbc.sql("DELETE FROM dt_user_branches WHERE user_id = :id").param("id", id).update();
+    jdbc.sql("DELETE FROM dt_user_mfa WHERE user_id = :id").param("id", id).update();
     jdbc.sql("DELETE FROM dt_users WHERE id = :id").param("id", id).update();
   }
 
@@ -106,6 +109,7 @@ public class UserDao {
         rs.getBoolean("active"),
         branchIds,
         all,
-        rs.getTimestamp("created_at").toInstant());
+        rs.getTimestamp("created_at").toInstant(),
+        rs.getBoolean("mfa_enabled"));
   }
 }

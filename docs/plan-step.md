@@ -581,6 +581,16 @@ CSRF กันที่ web ด้วย `XSRF-TOKEN` / `X-XSRF-TOKEN` (ขั�
     - flow ผ่าน web ด้วย curl แบบ Angular (cookie `an22.sid` + XSRF) ก็ผ่าน: login somchai → เปิดกะ → ขาย → ปิดกะ → logout → `/me` 401, ไม่มี XSRF → 403
   - ตอบแล้ว 2026-10-23: แก้ docs ของหน้าบ้าน (README หัวข้อ api + next-steps-plan) → FrontEnd-An22 `3590bc3` branch `docs/c2-done` (ยังไม่ push)
 
+### ขั้น 14 — login สองขั้นด้วย Microsoft Authenticator (E55, 2026-11-14)
+- spec: `../FrontEnd-An22/docs/backend/api-contract.md` หัวข้อ "Microsoft Authenticator", `domain-rules.md` (`totp.model.ts` / `mfa.model.ts`), golden `totp.json`
+- `V10__mfa.sql`: `dt_user_mfa` (secret เข้ารหัส `PiiCipher`, `confirmed_at`, `last_step`), `dt_company_info.mfa_required`, audit `mfa_enable` / `mfa_disable` / `mfa_reset`
+- `TotpRules` (JDK `HmacSHA1`, เวลาใช้ `Clock`) / `MfaRules`; `JwtService.issueMfa()` / `decodeMfa()` (aud `mfa`, 5 นาที — decoder ร้าน / platform ไม่รับ)
+- `POST /auth/login { …, mfa }` → `LoginResult` = session + token หรือ `MfaChallenge { challenge, mfa: verify|setup, setup? }`; challenge ไม่ล้างตัวนับของบัญชี
+  (ไม่งั้นรหัสผ่านถูกล้างตัวนับรหัส 6 หลักที่ผิดได้เรื่อย ๆ) · `POST /auth/mfa/verify` (public chain, Bearer = challenge) แบบ orchestrator นอก transaction + `LoginThrottle` (B5)
+- `/me/mfa/setup|confirm|disable` (`OwnMfaService`), `DELETE /users/{id}/mfa` (admin), `User.mfaEnabled` จาก `dt_user_mfa`, export ข้าม `dt_user_mfa`
+- test: `MfaLoginIT`, `MfaRulesTest`, `FixturesTest.totpMatchesFrontEnd`, route ใหม่ใน `CrossTenantSweepIT`
+- an22-web ต้องเก็บ `challenge` ใน session (ช่อง `mfaToken`) และส่งเป็น Bearer ให้ `/auth/mfa/verify` — งานของ repo web
+
 ## เรื่องที่ต้องถามผู้ใช้ระหว่างทาง (ไม่เดา)
 
 1. ~~ขั้น 2: จำกัด login ผิดต่อบัญชี / IP~~ — ตอบแล้ว 2026-10-22 (ขั้น 2)
