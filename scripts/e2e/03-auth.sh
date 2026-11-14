@@ -201,7 +201,7 @@ check "นับ throttle: ip" "ip:2:-" "$(throttle_row "ip:$ip")"
 as -
 
 case_id 3.13 "platform login"
-call @api1 POST /platform/auth/login '{"username":"platform","password":"platform"}'
+platform_login @api1
 expect_status 200
 T_PLATFORM=$(jq -r .token <<<"$BODY")
 expect_json 'keys | join(",")' "admin,token"
@@ -226,7 +226,32 @@ expect_json .username platform
 as -
 # คืนสภาพ: ปลดล็อกบัญชี platform ให้ข้อ 32–33 (ตกลงกับผู้ใช้)
 sql "DELETE FROM dt_login_throttle WHERE key_hash = decode('$(hmac "platform:platform")', 'hex')" >/dev/null
+platform_login
+expect_status 200
+
+case_id 3.14 "platform login ต้องผ่านรหัส Microsoft Authenticator เสมอ (E56)"
+sql "DELETE FROM dt_platform_admin_mfa" >/dev/null
 call POST /platform/auth/login '{"username":"platform","password":"platform"}'
 expect_status 200
+expect_json 'keys | join(",")' "challenge,mfa,setup"
+P_CHALLENGE=$(jq -r .challenge <<<"$BODY"); P_SECRET=$(jq -r .setup.secret <<<"$BODY")
+call POST /platform/auth/mfa/verify '{"code":"123456"}'
+expect_status 400
+expect_msg "หมดเวลายืนยันรหัส กรุณาเข้าสู่ระบบใหม่"
+as "$P_CHALLENGE"
+call GET /platform/me
+expect_status 401
+call POST /platform/auth/mfa/verify '{"code":"000000"}'
+expect_status 400
+expect_msg "รหัสยืนยันไม่ถูกต้อง"
+call POST /platform/auth/mfa/verify "{\"code\":\"$(totp "$P_SECRET")\"}"
+expect_status 200
+expect_json 'keys | join(",")' "admin,token"
+call POST /platform/auth/mfa/verify "{\"code\":\"$(totp "$P_SECRET")\"}"
+expect_status 400
+as -
+call POST /platform/auth/login '{"username":"platform","password":"platform"}'
+expect_json '.mfa' "verify"
+expect_json 'has("setup")' "false"
 
 finish

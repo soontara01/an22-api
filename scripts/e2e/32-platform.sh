@@ -20,7 +20,7 @@ signup() { # tag → $S_CODE $S_ID $S_TOKEN
 std_company E32
 login "$CODE" cash1 pass1234; T_CASH1=$TOKEN
 as -
-call POST /platform/auth/login '{"username":"platform","password":"platform"}'
+platform_login
 T_P=$(jq -r .token <<<"$BODY")
 P_NAME=$(jq -r .admin.name <<<"$BODY")
 

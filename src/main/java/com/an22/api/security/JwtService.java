@@ -54,6 +54,8 @@ public class JwtService {
   public static final String AUD_PLATFORM = "platform";
   /** E55: login ที่รอรหัส Microsoft Authenticator — ใช้แทน token ร้าน / platform ไม่ได้. */
   public static final String AUD_MFA = "mfa";
+  /** E56: login ของ platform admin ที่รอรหัส Authenticator. */
+  public static final String AUD_PLATFORM_MFA = "platform-mfa";
   /** อายุของ challenge (E55). */
   public static final Duration MFA_TTL = Duration.ofMinutes(5);
   public static final String CLAIM_TENANT = "tenantId";
@@ -63,6 +65,7 @@ public class JwtService {
   private final JwtDecoder shopDecoder;
   private final JwtDecoder platformDecoder;
   private final JwtDecoder mfaDecoder;
+  private final JwtDecoder platformMfaDecoder;
   private final Duration ttl;
   private final Clock clock;
 
@@ -76,6 +79,7 @@ public class JwtService {
     this.shopDecoder = decoder(all, AUD_SHOP, clock);
     this.platformDecoder = decoder(all, AUD_PLATFORM, clock);
     this.mfaDecoder = decoder(all, AUD_MFA, clock);
+    this.platformMfaDecoder = decoder(all, AUD_PLATFORM_MFA, clock);
     this.ttl = Duration.ofDays(props.jwt().ttlDays());
     this.clock = clock;
   }
@@ -92,6 +96,23 @@ public class JwtService {
   /** challenge ของขั้นรหัส Authenticator (E55): ผู้ใช้ + บริษัท อายุ {@link #MFA_TTL} — an22-web เก็บไว้ใน session เหมือน token. */
   public String issueMfa(long tenantId, long userId) {
     return encode(AUD_MFA, Long.toString(userId), Map.of(CLAIM_TENANT, tenantId), MFA_TTL);
+  }
+
+  /** challenge ของ platform admin (E56) อายุ {@link #MFA_TTL}. */
+  public String issuePlatformMfa(long adminId) {
+    return encode(AUD_PLATFORM_MFA, Long.toString(adminId), Map.of(), MFA_TTL);
+  }
+
+  /** ตรวจ challenge ของ platform admin — ไม่ผ่าน = empty. */
+  public Optional<Jwt> decodePlatformMfa(String token) {
+    if (token == null || token.isBlank()) {
+      return Optional.empty();
+    }
+    try {
+      return Optional.of(platformMfaDecoder.decode(token));
+    } catch (JwtException e) {
+      return Optional.empty();
+    }
   }
 
   /** ตรวจ challenge — ไม่ผ่าน (ปลอม / หมดอายุ / token ชนิดอื่น / ไม่มี) = empty. */

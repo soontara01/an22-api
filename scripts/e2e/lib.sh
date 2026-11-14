@@ -145,6 +145,32 @@ login() {
   TOKEN=$(jq -r '.token // empty' <<<"$BODY" 2>/dev/null || true)
 }
 
+# totp SECRET [AHEAD] → รหัส 6 หลักของช่วง 30 วิ ตอนนี้ (+AHEAD ช่วง) — RFC 6238 แบบ Microsoft Authenticator (E55 / E56)
+totp() {
+  python3 -I -c 'import sys,hmac,hashlib,base64,struct,time
+s=sys.argv[1]; k=base64.b32decode(s+"="*(-len(s)%8)); c=int(time.time())//30+int(sys.argv[2])
+h=hmac.new(k,struct.pack(">Q",c),hashlib.sha1).digest(); o=h[19]&15
+print("%06d"%((struct.unpack(">I",h[o:o+4])[0]&0x7fffffff)%1000000))' "$1" "${2:-0}"
+}
+
+# platform_login [@api1|@api2] → login ของ platform admin ครบสองขั้น (E56): ล้าง Authenticator ของ `platform` ด้วย SQL ก่อน
+# (ได้ setup + secret ทุกครั้ง) → รหัสผ่าน → รหัส 6 หลัก; $STATUS / $BODY = ของ /platform/auth/mfa/verify ({token, admin})
+platform_login() {
+  local base=@lb saved=$E2E_TOKEN
+  [[ "${1:-}" == @api* ]] && base=$1
+  sql "DELETE FROM dt_platform_admin_mfa WHERE admin_id = (SELECT id FROM dt_platform_admins WHERE username = 'platform')" >/dev/null
+  E2E_TOKEN=""
+  call "$base" POST /platform/auth/login '{"username":"platform","password":"platform"}'
+  local challenge secret
+  challenge=$(jq -r '.challenge // empty' <<<"$BODY" 2>/dev/null || true)
+  secret=$(jq -r '.setup.secret // empty' <<<"$BODY" 2>/dev/null || true)
+  if [[ -n "$challenge" && -n "$secret" ]]; then
+    E2E_TOKEN=$challenge
+    call "$base" POST /platform/auth/mfa/verify "{\"code\":\"$(totp "$secret")\"}"
+  fi
+  E2E_TOKEN=$saved
+}
+
 expect_status() {
   if [[ "$STATUS" == "$1" ]]; then pass "status $1"; else fail "status คาด $1 ได้ $STATUS: ${BODY:0:300}"; fi
 }

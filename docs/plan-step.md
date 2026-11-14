@@ -591,6 +591,14 @@ CSRF กันที่ web ด้วย `XSRF-TOKEN` / `X-XSRF-TOKEN` (ขั�
 - test: `MfaLoginIT`, `MfaRulesTest`, `FixturesTest.totpMatchesFrontEnd`, route ใหม่ใน `CrossTenantSweepIT`
 - an22-web ต้องเก็บ `challenge` ใน session (ช่อง `mfaToken`) และส่งเป็น Bearer ให้ `/auth/mfa/verify` — งานของ repo web
 
+### ขั้น 15 — platform admin ต้องใช้ Microsoft Authenticator (E56, 2026-11-14)
+- `V11__platform_mfa.sql`: `dt_platform_admin_mfa` (ตาราง platform ไม่มี tenant — an22_platform เท่านั้น)
+- `POST /platform/auth/login` → รหัสผ่านถูก = `MfaChallenge` เสมอ (JWT aud `platform-mfa` 5 นาที) ไม่ล้างตัวนับของบัญชี ·
+  `POST /platform/auth/mfa/verify` (public chain, Bearer = challenge) → `{ token, admin }`; ผิด / ใช้แล้ว / หมดเวลา → 400, นับผิดในตัวนับ `platform:<username>`
+- มือถือหาย: `scripts/platform-mfa-reset.sh <username>` / `--list` (owner ของ DB ชุดเดียวกับ migrate ของ `db-apply.sh`)
+- e2e: `platform_login` + `totp` ใน `scripts/e2e/lib.sh` (ล้าง Authenticator ก่อน → setup → รหัส), case 3.14
+- test: `PlatformAuthIT` (สองขั้น, secret เดิม, challenge ใช้แทน token ไม่ได้, รหัสซ้ำ)
+
 ## เรื่องที่ต้องถามผู้ใช้ระหว่างทาง (ไม่เดา)
 
 1. ~~ขั้น 2: จำกัด login ผิดต่อบัญชี / IP~~ — ตอบแล้ว 2026-10-22 (ขั้น 2)

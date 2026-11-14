@@ -91,7 +91,7 @@ call POST /company/deletion "{\"companyCode\":\"$P_CODE\",\"password\":\"owner12
 expect_status 200
 as -
 sql "UPDATE dt_companies SET purge_after = current_date WHERE id = $P" >/dev/null
-call POST /platform/auth/login '{"username":"platform","password":"platform"}'
+platform_login
 as "$(jq -r .token <<<"$BODY")"
 call POST "/platform/companies/$P/purge"
 expect_status 200

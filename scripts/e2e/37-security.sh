@@ -46,7 +46,7 @@ call POST /sales "$(jq -nc --argjson p "$P_MS" --argjson c "$PM_CARD" --arg r "$
   payments:[{methodId:$c, amount:350, reference:$r}], customer:"", expectedTotal:350}')"
 check "เลขบัตรเต็มในช่องอ้างอิง → 400" 400 "$STATUS"
 check "ไม่เก็บเลขบัตรเต็ม" 0 "$(sql "SELECT count(*) FROM dt_sale_payments WHERE reference LIKE '%$PAN%'")"
-call POST /platform/auth/login '{"username":"platform","password":"platform"}'
+platform_login
 T_PLAT=$(jq -r .token <<<"$BODY"); check "platform login" 200 "$STATUS"
 as -; branch -; terminal -
 

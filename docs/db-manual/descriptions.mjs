@@ -19,7 +19,7 @@ export const domains = [
     soft: '#f3e5f5',
     intro:
       'ตารางของผู้ให้บริการ ไม่ใช่ข้อมูลของร้าน: ทะเบียนบริษัท (tenant), ผู้ดูแลแพลตฟอร์ม, ใบแจ้งหนี้ค่าบริการ, ลิงก์ตั้งรหัสผ่าน และตัวนับ login ผิด — ส่วนใหญ่ไม่มี `tenant_id` และใช้ผ่าน role `an22_platform` (BYPASSRLS) เท่านั้น; `dt_companies` / `dt_billing_invoices` เปิด RLS ให้ร้านอ่านแถวของตัวเองได้',
-    tables: ['dt_companies', 'dt_platform_admins', 'dt_billing_invoices', 'dt_platform_doc_counters', 'dt_password_reset_tokens', 'dt_login_throttle'],
+    tables: ['dt_companies', 'dt_platform_admins', 'dt_platform_admin_mfa', 'dt_billing_invoices', 'dt_platform_doc_counters', 'dt_password_reset_tokens', 'dt_login_throttle'],
   },
   {
     id: 'B',
@@ -214,6 +214,26 @@ export const tables = {
       username: 'ชื่อ login ของหน้า /platform (ตัวเล็ก)',
       name: 'ชื่อที่แสดง / บันทึกเป็นผู้ทำใน audit ของบริษัท',
       password_hash: 'hash ของรหัสผ่าน (BCrypt) — ไม่เคยส่งออก API',
+    },
+  },
+  dt_platform_admin_mfa: {
+    title: 'Microsoft Authenticator ของผู้ดูแลแพลตฟอร์ม',
+    purpose:
+      'E56: platform admin ทุกคนต้อง login ด้วยรหัสผ่าน + รหัส 6 หลักจาก Microsoft Authenticator (TOTP RFC 6238) เสมอ — ตารางนี้เก็บ secret ของแต่ละคน',
+    lifecycle: [
+      'สร้าง (รอยืนยัน `confirmed_at` null): `POST /platform/auth/login` ครั้งแรกที่รหัสผ่านถูก — ลองใหม่ได้ secret เดิมจนกว่าจะยืนยัน',
+      'ยืนยัน: รหัสแรกที่ถูก (`POST /platform/auth/mfa/verify`) ตั้ง `confirmed_at`; ทุกครั้งที่ใช้รหัสตั้ง `last_step`',
+      'ลบ: มือถือหาย / เปลี่ยนเครื่อง — `scripts/platform-mfa-reset.sh <username>` บน server (ไม่มีหน้าจอ) แล้ว login ครั้งถัดไปผูกใหม่',
+    ],
+    rules: [
+      '1 แถวต่อ admin (PK `admin_id`); ไม่อยู่ใต้ RLS, an22_app ไม่มีสิทธิ์ — ใช้ผ่าน an22_platform เท่านั้น',
+      'รับรหัสของช่วงปัจจุบัน ±1 ช่วง และต้องมากกว่า `last_step` (UPDATE … WHERE last_step < :step — รหัสเดิมใช้ซ้ำไม่ได้)',
+    ],
+    columns: {
+      admin_id: 'ผู้ดูแลแพลตฟอร์ม → `dt_platform_admins`',
+      secret_enc: 'secret base32 (20 byte) เข้ารหัส AES-GCM ด้วย `PiiCipher` (AAD `dt_platform_admin_mfa.secret:<admin id>`)',
+      confirmed_at: 'เวลาที่ยืนยันด้วยรหัสแรก — null = ผูกยังไม่เสร็จ',
+      last_step: 'ช่วง 30 วินาที (unix time / 30) ของรหัสที่ใช้ล่าสุด — กันใช้รหัสซ้ำ',
     },
   },
   dt_billing_invoices: {

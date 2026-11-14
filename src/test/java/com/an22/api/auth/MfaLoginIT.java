@@ -61,11 +61,15 @@ class MfaLoginIT extends ApiTest {
     return TotpRules.code(secret, TotpRules.step(System.currentTimeMillis()) + ahead);
   }
 
+  /** ช่วงที่รหัสตอนผูกถูกใช้ — รหัสต่อจากนี้คิดจากช่วงนี้ ไม่ขึ้นกับว่านาฬิกาเดินข้ามช่วงระหว่าง test (ไม่ flaky). */
+  private long enrolStep;
+
   /** ผูก Authenticator ให้ผู้ใช้ผ่าน {@code /auth/login-mfa} → secret. */
   private String enrol(String username) throws Exception {
     JsonNode challenge = json(loginAttempt(username, true).andExpect(status().isOk()));
     String secret = challenge.path("setup").path("secret").asString();
-    verify(challenge.path("challenge").asString(), codeNow(secret, 0)).andExpect(status().isOk());
+    enrolStep = TotpRules.step(System.currentTimeMillis());
+    verify(challenge.path("challenge").asString(), TotpRules.code(secret, enrolStep)).andExpect(status().isOk());
     return secret;
   }
 
@@ -122,8 +126,8 @@ class MfaLoginIT extends ApiTest {
         .andExpect(jsonPath("$.setup").doesNotExist())
         .andExpect(jsonPath("$.token").doesNotExist()));
     String token = challenge.path("challenge").asString();
-    verify(token, codeNow(secret, 0)).andExpect(status().isBadRequest()).andExpect(content().json(message(WRONG_CODE)));
-    verify(token, codeNow(secret, 1)).andExpect(status().isOk()).andExpect(jsonPath("$.token").isString());
+    verify(token, TotpRules.code(secret, enrolStep)).andExpect(status().isBadRequest()).andExpect(content().json(message(WRONG_CODE)));
+    verify(token, TotpRules.code(secret, enrolStep + 1)).andExpect(status().isOk()).andExpect(jsonPath("$.token").isString());
   }
 
   @Test

@@ -56,7 +56,7 @@ echo "     ข้อมูล A ก่อน purge: $a_rows แถว · $a_tabl
 check "เตรียม: ทุกชนิดมีแถว" "ok" "$(for t in dt_sales dt_tax_invoices dt_shifts dt_transfers dt_credit_notes dt_exchanges dt_held_bills dt_suppliers dt_promotions dt_audit_log dt_menu_access dt_stock_movements; do
   [[ " $a_tables " == *" $t="* ]] || echo -n "$t "; done; echo -n ok)"
 expect_sql "SELECT (SELECT count(*) FROM dt_password_reset_tokens WHERE company_id = $A) || ':' || (SELECT count(*) FROM dt_billing_invoices WHERE company_id = $A)" "1:1"
-as -; call POST /platform/auth/login '{"username":"platform","password":"platform"}'; T_P=$(jq -r .token <<<"$BODY")
+as -; platform_login; T_P=$(jq -r .token <<<"$BODY")
 B_BEFORE=$(snapshot "$B")
 
 case_id 33.1 "purge ไม่มีคำขอ / ก่อนครบ 30 วัน"
