@@ -63,6 +63,7 @@ class CrossTenantSweepIT extends ApiTest {
     ROUTES.put("POST /transfers/{id}/cancel", "transfers");
     ROUTES.put("POST /transfers/{id}/receive", "transfers");
     ROUTES.put("PUT /users/{id}/password", "users");
+    ROUTES.put("DELETE /users/{id}/mfa", "users");
   }
 
   @Autowired TestCompanies companies;

@@ -114,6 +114,23 @@ class FixturesTest {
     }));
   }
 
+  record TotpInput(String secret, String code, long nowMs, Long lastStep) {}
+
+  record TotpExpected(Long step, String codeNow) {}
+
+  record TotpCase(String name, TotpInput input, TotpExpected expected) {}
+
+  /** E55: {@link TotpRules} ตรงกับ {@code totp.json} (5 เคสแรกคือ test vector ของ RFC 6238). */
+  @TestFactory
+  Stream<DynamicTest> totpMatchesFrontEnd() throws Exception {
+    List<TotpCase> cases = read("totp.json", new TypeReference<>() {});
+    return cases.stream().map(c -> DynamicTest.dynamicTest(c.name(), () -> {
+      TotpInput in = c.input();
+      assertThat(TotpRules.verify(in.secret(), in.code(), in.nowMs(), in.lastStep())).isEqualTo(c.expected().step());
+      assertThat(TotpRules.code(in.secret(), TotpRules.step(in.nowMs()))).isEqualTo(c.expected().codeNow());
+    }));
+  }
+
   private static <T> T read(String file, TypeReference<T> type) throws Exception {
     Path path = DIR.resolve(file);
     assertThat(Files.isRegularFile(path)).as("ไม่พบ fixtures %s (ตั้ง -Dfixtures.dir)", path.toAbsolutePath()).isTrue();

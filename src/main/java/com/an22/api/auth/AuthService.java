@@ -3,9 +3,12 @@ package com.an22.api.auth;
 import com.an22.api.auth.SessionDao.Via;
 import com.an22.api.billing.BillingService;
 import com.an22.api.model.LoginResponse;
+import com.an22.api.model.LoginResult;
 import com.an22.api.model.User;
 import com.an22.api.rules.CompanyRules;
+import com.an22.api.rules.MfaRules;
 import com.an22.api.rules.UserRules;
+import com.an22.api.security.JwtService;
 import com.an22.api.web.ApiException;
 import java.util.List;
 import java.util.Map;
@@ -33,14 +36,19 @@ public class AuthService {
   private final LoginThrottle throttle;
   private final ShopLoginTx tx;
   private final BillingService billing;
+  private final JwtService jwt;
 
-  AuthService(LoginThrottle throttle, ShopLoginTx tx, BillingService billing) {
+  AuthService(LoginThrottle throttle, ShopLoginTx tx, BillingService billing, JwtService jwt) {
     this.throttle = throttle;
     this.tx = tx;
     this.billing = billing;
+    this.jwt = jwt;
   }
 
-  public record LoginRequest(String companyCode, String username, String password) {}
+  /** {@code mfa: true} = เข้าทาง {@code /auth/login-mfa}: ถามรหัส Authenticator เสมอ (E55). */
+  public record LoginRequest(String companyCode, String username, String password, Boolean mfa) {}
+
+  public record MfaVerifyRequest(String code) {}
 
   public record VerifyRequest(String username, String password) {}
 
@@ -48,7 +56,7 @@ public class AuthService {
    * {@code POST /auth/login}: ไม่เปิด transaction เอง — จองสิทธิ์ลอง ({@link LoginThrottle#attempt}, B6) / billing catch-up /
    * {@link ShopLoginTx#attempt} / ผล เป็น transaction สั้น ๆ ต่อกัน ไม่ซ้อน: 1 request ใช้ connection ของ pool platform ทีละ 1 (B5).
    */
-  public LoginResponse login(LoginRequest req, String ip) {
+  public LoginResult login(LoginRequest req, String ip) {
     String code = CompanyRules.normalizeCompanyCode(req.companyCode());
     String username = UserRules.normalizeUsername(req.username());
     List<ThrottleKey> keys = List.of(ThrottleKey.shop(code, username), ThrottleKey.ip(ip));
@@ -58,8 +66,9 @@ public class AuthService {
     try {
       // ออกใบแจ้งหนี้ / ระงับค้างชำระที่ถึงรอบก่อน job (แผนหัวข้อ "Stateless / scale") — commit ของตัวเองแม้ login ไม่ผ่าน
       tx.companyId(code).ifPresent(billing::catchUp);
-      LoginResponse response = tx.attempt(code, username, req.password());
-      ok = true;
+      LoginResult response = tx.attempt(code, username, req.password(), Boolean.TRUE.equals(req.mfa()));
+      // ขั้นรหัส Authenticator (E55) ยังไม่ใช่ login สำเร็จ: คืนสิทธิ์ที่จองแต่ไม่ล้างตัวนับของบัญชี (ไม่งั้นรหัสผ่านถูกล้างตัวนับรหัส 6 หลักที่ผิดได้เรื่อย ๆ)
+      ok = response instanceof LoginResponse;
       return response;
     } catch (ShopLoginTx.Rejected rejected) {
       wrong = true;
@@ -67,6 +76,40 @@ public class AuthService {
       throw new ApiException(HttpStatus.UNAUTHORIZED, WRONG_COMPANY_LOGIN);
     } finally {
       // รหัสถูก (สำเร็จ / บริษัทถูกระงับ) หรือ error = ไม่ใช่ความผิด → คืนสิทธิ์ที่จอง
+      if (!wrong) {
+        throttle.passed(keys, ok);
+      }
+    }
+  }
+
+  /**
+   * {@code POST /auth/mfa/verify} (E55): รหัส 6 หลักของ login ที่รอใน challenge ({@code Authorization: Bearer} — an22-web ใส่ให้) — ไม่เปิด
+   * transaction เอง (B5): challenge ไม่มี / หมดอายุ → 400; นับผิดในตัวนับของบัญชีเดียวกับรหัสผ่าน; ผิด → 400 (ห้าม 401).
+   */
+  public LoginResponse verifyMfa(String challenge, MfaVerifyRequest req, String ip) {
+    var token = jwt.decodeMfa(challenge).orElseThrow(() -> ApiException.badRequest(MfaRules.CHALLENGE_EXPIRED));
+    long tenantId;
+    long userId;
+    try {
+      tenantId = ((Number) token.getClaim(JwtService.CLAIM_TENANT)).longValue();
+      userId = Long.parseLong(token.getSubject());
+    } catch (RuntimeException e) {
+      throw ApiException.badRequest(MfaRules.CHALLENGE_EXPIRED);
+    }
+    ShopLoginTx.Who who = tx.who(tenantId, userId).orElseThrow(() -> ApiException.badRequest(MfaRules.CHALLENGE_EXPIRED));
+    List<ThrottleKey> keys = List.of(ThrottleKey.shop(who.companyCode(), who.username()), ThrottleKey.ip(ip));
+    throttle.attempt(keys);
+    boolean wrong = false;
+    boolean ok = false;
+    try {
+      LoginResponse response = tx.verifyMfa(tenantId, userId, req == null ? "" : req.code());
+      ok = true;
+      return response;
+    } catch (ShopLoginTx.Rejected rejected) {
+      wrong = true;
+      throttle.failed(rejected.failedLogin);
+      throw ApiException.badRequest(MfaRules.WRONG_CODE);
+    } finally {
       if (!wrong) {
         throttle.passed(keys, ok);
       }

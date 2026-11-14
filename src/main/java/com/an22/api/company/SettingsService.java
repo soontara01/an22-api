@@ -95,8 +95,9 @@ public class SettingsService {
     if (problem != null) {
       throw ApiException.badRequest(problem);
     }
-    CompanyInfo info = CompanyRules.companyInfoOf(payload);
     CompanyInfo before = company.get();
+    // StoreInfo ไม่มี mfaRequired (E55) — คงค่าที่เก็บไว้
+    CompanyInfo info = CompanyRules.companyInfoOf(payload).withMfaRequired(before.mfaRequired());
     company.update(info);
     Branch branch = requestBranch(ctx);
     BranchPayload details =

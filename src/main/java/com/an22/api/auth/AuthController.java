@@ -1,8 +1,10 @@
 package com.an22.api.auth;
 
 import com.an22.api.auth.AuthService.LoginRequest;
+import com.an22.api.auth.AuthService.MfaVerifyRequest;
 import com.an22.api.auth.AuthService.VerifyRequest;
 import com.an22.api.model.LoginResponse;
+import com.an22.api.model.LoginResult;
 import com.an22.api.model.Session;
 import com.an22.api.model.SignupPayload;
 import com.an22.api.model.User;
@@ -10,7 +12,9 @@ import com.an22.api.web.ClientIp;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.http.HttpHeaders;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RestController;
 
 /** login / session ของร้าน (api-contract.md หัวข้อ Auth) — logout เป็นของ an22-web (E48). */
@@ -31,8 +35,18 @@ public class AuthController {
 
   /** ไม่ต้องมี token (public chain) — ผิด → 401 ข้อความเดียว, ผิดบ่อย → 429. */
   @PostMapping("/auth/login")
-  LoginResponse login(@RequestBody LoginRequest body, HttpServletRequest request) {
+  LoginResult login(@RequestBody LoginRequest body, HttpServletRequest request) {
     return auth.login(body, ClientIp.of(request));
+  }
+
+  /** ขั้นรหัส Microsoft Authenticator (E55, public chain — Bearer = challenge ที่ an22-web เก็บไว้) — ผิด / หมดเวลา → 400 เสมอ. */
+  @PostMapping("/auth/mfa/verify")
+  LoginResponse verifyMfa(
+      @RequestHeader(value = HttpHeaders.AUTHORIZATION, required = false) String authorization,
+      @RequestBody(required = false) MfaVerifyRequest body,
+      HttpServletRequest request) {
+    String challenge = authorization != null && authorization.startsWith("Bearer ") ? authorization.substring(7).strip() : null;
+    return auth.verifyMfa(challenge, body, ClientIp.of(request));
   }
 
   /** สมัครใช้งาน (public) — สำเร็จ = login เป็น owner ทันที; ถี่เกิน → 429. */

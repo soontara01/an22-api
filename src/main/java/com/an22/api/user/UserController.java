@@ -57,6 +57,13 @@ public class UserController {
     service.delete(s, id);
   }
 
+  /** E55: ล้าง Microsoft Authenticator ของผู้ใช้ (มือถือหาย). */
+  @DeleteMapping("/users/{id}/mfa")
+  User resetMfa(ShopSession s, @PathVariable long id) {
+    Permissions.requireAdmin(s, ADMIN_ONLY);
+    return service.resetMfa(s, id);
+  }
+
   @PutMapping("/users/{id}/password")
   void setPassword(ShopSession s, @PathVariable long id, @RequestBody PasswordBody body) {
     Permissions.requireAdmin(s, ADMIN_ONLY);

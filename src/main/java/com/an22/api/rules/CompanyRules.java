@@ -18,7 +18,10 @@ public final class CompanyRules {
   public static final CompanyInfo COMPANY_INFO_DEFAULTS =
       new CompanyInfo(
           "", "", true, "A4", BigDecimal.valueOf(7), BigDecimal.valueOf(5), true, BigDecimal.valueOf(100),
-          BigDecimal.valueOf(12), false);
+          BigDecimal.valueOf(12), false, "none");
+
+  /** {@code CompanyInfo.mfaRequired} (E55). */
+  public static final List<String> MFA_REQUIREMENTS = List.of("none", "admins", "all");
 
   private CompanyRules() {}
 
@@ -44,7 +47,7 @@ public final class CompanyRules {
   public static CompanyInfo companyInfoOf(StoreInfo s) {
     return new CompanyInfo(
         s.name(), s.taxId(), s.vatRegistered(), s.taxInvoicePaper(), s.exchangeDays(), s.manualDiscountMaxPercent(),
-        s.requireShift(), s.shiftVarianceLimit(), s.shiftMaxHours(), s.staffSeeCost() != null && s.staffSeeCost());
+        s.requireShift(), s.shiftVarianceLimit(), s.shiftMaxHours(), s.staffSeeCost() != null && s.staffSeeCost(), "none");
   }
 
   /** {@code normalizeCompanyInfo()}: ค่าที่ไม่ส่ง = ค่าเริ่ม, ตัดช่องว่าง, เลขภาษีตัด ช่องว่าง / {@code -}. */
@@ -60,7 +63,8 @@ public final class CompanyRules {
         c.requireShift() == null ? d.requireShift() : c.requireShift(),
         or(c.shiftVarianceLimit(), d.shiftVarianceLimit()),
         or(c.shiftMaxHours(), d.shiftMaxHours()),
-        c.staffSeeCost() != null && c.staffSeeCost());
+        c.staffSeeCost() != null && c.staffSeeCost(),
+        c.mfaRequired() == null ? d.mfaRequired() : c.mfaRequired());
   }
 
   /** {@code companyInfoError()}: กฎเดียวของตั้งค่าบริษัท (ฟอร์ม + server). */
@@ -88,6 +92,9 @@ public final class CompanyRules {
     }
     if (!isInteger(c.shiftMaxHours()) || !between(c.shiftMaxHours(), 1, 48)) {
       return "ชั่วโมงเตือนกะเปิดค้างต้องเป็นจำนวนเต็ม 1–48";
+    }
+    if (!MFA_REQUIREMENTS.contains(c.mfaRequired())) {
+      return "การบังคับใช้ Microsoft Authenticator ไม่ถูกต้อง";
     }
     return null;
   }

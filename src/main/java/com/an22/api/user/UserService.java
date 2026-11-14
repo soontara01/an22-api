@@ -1,7 +1,9 @@
 package com.an22.api.user;
 
 import com.an22.api.audit.Audit;
+import com.an22.api.auth.MfaService;
 import com.an22.api.auth.PasswordResetTokens;
+import com.an22.api.auth.SessionDao.Via;
 import com.an22.api.auth.ShopSession;
 import com.an22.api.branch.BranchDao;
 import com.an22.api.company.PlanLimits;
@@ -9,6 +11,7 @@ import com.an22.api.db.TenantLocks;
 import com.an22.api.model.User;
 import com.an22.api.model.UserPayload;
 import com.an22.api.rules.AuditRules;
+import com.an22.api.rules.MfaRules;
 import com.an22.api.rules.PlanRules.LimitKind;
 import com.an22.api.rules.UserRules;
 import com.an22.api.rules.UserRules.Rights;
@@ -39,6 +42,7 @@ public class UserService {
   private final PasswordEncoder passwords;
   private final PasswordResetTokens tokens;
   private final Audit audit;
+  private final MfaService mfa;
 
   UserService(
       UserDao dao,
@@ -47,7 +51,8 @@ public class UserService {
       PlanLimits limits,
       PasswordEncoder passwords,
       PasswordResetTokens tokens,
-      Audit audit) {
+      Audit audit,
+      MfaService mfa) {
     this.dao = dao;
     this.branches = branches;
     this.locks = locks;
@@ -55,6 +60,7 @@ public class UserService {
     this.passwords = passwords;
     this.tokens = tokens;
     this.audit = audit;
+    this.mfa = mfa;
   }
 
   @Transactional(readOnly = true)
@@ -137,6 +143,17 @@ public class UserService {
     badRequest(UserRules.passwordError(password));
     dao.setPassword(id, passwords.encode(password));
     audit.record(s, "user_password", null, "user", id, user.username(), "ผู้ดูแลระบบตั้งรหัสผ่านใหม่ให้");
+  }
+
+  /** {@code DELETE /users/:id/mfa} (E55): ล้าง Authenticator ของผู้อื่นในขอบเขตของ admin — login ครั้งถัดไปที่ต้องใช้จะผูกใหม่. */
+  @Transactional
+  public User resetMfa(ShopSession s, long id) {
+    User user = find(id);
+    scope(s, Rights.of(user), Rights.of(user));
+    badRequest(MfaRules.mfaResetError(user.id(), user.mfaEnabled(), s.user().id()));
+    mfa.remove(Via.APP, s.tenantId(), id);
+    audit.record(s, "mfa_reset", null, "user", id, user.username(), "ผู้ดูแลระบบล้าง Microsoft Authenticator ให้");
+    return find(id);
   }
 
   /** {@code withUserRules()}: username ตัวเล็ก, อีเมลตัดช่องว่าง, owner ทุกสาขาเสมอ, สาขาไม่ซ้ำเรียงน้อยไปมาก (ว่างเมื่อทุกสาขา). */

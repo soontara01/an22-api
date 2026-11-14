@@ -52,12 +52,17 @@ public class JwtService {
   public static final String ISSUER = "an22-api";
   public static final String AUD_SHOP = "shop";
   public static final String AUD_PLATFORM = "platform";
+  /** E55: login ที่รอรหัส Microsoft Authenticator — ใช้แทน token ร้าน / platform ไม่ได้. */
+  public static final String AUD_MFA = "mfa";
+  /** อายุของ challenge (E55). */
+  public static final Duration MFA_TTL = Duration.ofMinutes(5);
   public static final String CLAIM_TENANT = "tenantId";
 
   private final NimbusJwtEncoder encoder;
   private final String signingKid;
   private final JwtDecoder shopDecoder;
   private final JwtDecoder platformDecoder;
+  private final JwtDecoder mfaDecoder;
   private final Duration ttl;
   private final Clock clock;
 
@@ -70,6 +75,7 @@ public class JwtService {
     this.encoder = new NimbusJwtEncoder(new ImmutableJWKSet<>(new JWKSet(all.getKeyByKeyId(signingKid))));
     this.shopDecoder = decoder(all, AUD_SHOP, clock);
     this.platformDecoder = decoder(all, AUD_PLATFORM, clock);
+    this.mfaDecoder = decoder(all, AUD_MFA, clock);
     this.ttl = Duration.ofDays(props.jwt().ttlDays());
     this.clock = clock;
   }
@@ -79,12 +85,30 @@ public class JwtService {
     return encode(
         AUD_SHOP,
         Long.toString(userId),
-        Map.of(CLAIM_TENANT, tenantId, "role", role, "allBranches", allBranches, "branchIds", branchIds));
+        Map.of(CLAIM_TENANT, tenantId, "role", role, "allBranches", allBranches, "branchIds", branchIds),
+        ttl);
+  }
+
+  /** challenge ของขั้นรหัส Authenticator (E55): ผู้ใช้ + บริษัท อายุ {@link #MFA_TTL} — an22-web เก็บไว้ใน session เหมือน token. */
+  public String issueMfa(long tenantId, long userId) {
+    return encode(AUD_MFA, Long.toString(userId), Map.of(CLAIM_TENANT, tenantId), MFA_TTL);
+  }
+
+  /** ตรวจ challenge — ไม่ผ่าน (ปลอม / หมดอายุ / token ชนิดอื่น / ไม่มี) = empty. */
+  public Optional<Jwt> decodeMfa(String token) {
+    if (token == null || token.isBlank()) {
+      return Optional.empty();
+    }
+    try {
+      return Optional.of(mfaDecoder.decode(token));
+    } catch (JwtException e) {
+      return Optional.empty();
+    }
   }
 
   /** token ของ platform admin. */
   public String issuePlatform(long adminId) {
-    return encode(AUD_PLATFORM, Long.toString(adminId), Map.of());
+    return encode(AUD_PLATFORM, Long.toString(adminId), Map.of(), ttl);
   }
 
   public JwtDecoder shopDecoder() {
@@ -107,7 +131,7 @@ public class JwtService {
     }
   }
 
-  private String encode(String audience, String subject, Map<String, Object> claims) {
+  private String encode(String audience, String subject, Map<String, Object> claims, Duration lifetime) {
     Instant now = clock.instant();
     JwtClaimsSet.Builder set =
         JwtClaimsSet.builder()
@@ -115,7 +139,7 @@ public class JwtService {
             .audience(List.of(audience))
             .subject(subject)
             .issuedAt(now)
-            .expiresAt(now.plus(ttl))
+            .expiresAt(now.plus(lifetime))
             .id(UUID.randomUUID().toString());
     claims.forEach(set::claim);
     JwsHeader header = JwsHeader.with(MacAlgorithm.HS256).keyId(signingKid).build();
