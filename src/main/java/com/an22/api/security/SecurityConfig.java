@@ -41,7 +41,7 @@ public class SecurityConfig {
 
   /** path ที่ไม่ต้องมี token (ไม่รวม /api). */
   static final String[] PUBLIC_PATHS = {"/healthz", "/readyz", "/error", "/auth/login", "/auth/mfa/verify", "/auth/signup", "/auth/forgot-password", "/auth/reset-password",
-      "/platform/auth/login"};
+      "/platform/auth/login", "/platform/auth/mfa/verify"};
 
   @Bean
   PasswordEncoder passwordEncoder() {

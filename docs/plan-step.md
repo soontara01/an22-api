@@ -591,6 +591,31 @@ CSRF กันที่ web ด้วย `XSRF-TOKEN` / `X-XSRF-TOKEN` (ขั�
 - test: `MfaLoginIT`, `MfaRulesTest`, `FixturesTest.totpMatchesFrontEnd`, route ใหม่ใน `CrossTenantSweepIT`
 - an22-web ต้องเก็บ `challenge` ใน session (ช่อง `mfaToken`) และส่งเป็น Bearer ให้ `/auth/mfa/verify` — งานของ repo web
 
+### ขั้น 15 — platform admin ต้องใช้ Microsoft Authenticator (E56, 2026-11-14)
+- `V11__platform_mfa.sql`: `dt_platform_admin_mfa` (ตาราง platform ไม่มี tenant — an22_platform เท่านั้น)
+- `POST /platform/auth/login` → รหัสผ่านถูก = `MfaChallenge` เสมอ (JWT aud `platform-mfa` 5 นาที) ไม่ล้างตัวนับของบัญชี ·
+  `POST /platform/auth/mfa/verify` (public chain, Bearer = challenge) → `{ token, admin }`; ผิด / ใช้แล้ว / หมดเวลา → 400, นับผิดในตัวนับ `platform:<username>`
+- มือถือหาย: `scripts/platform-mfa-reset.sh <username>` / `--list` (owner ของ DB ชุดเดียวกับ migrate ของ `db-apply.sh`)
+- e2e: `platform_login` + `totp` ใน `scripts/e2e/lib.sh` (ล้าง Authenticator ก่อน → setup → รหัส), case 3.14
+- test: `PlatformAuthIT` (สองขั้น, secret เดิม, challenge ใช้แทน token ไม่ได้, รหัสซ้ำ)
+
+### ขั้น 16 — ผู้ใช้ร้านทุกคนต้องใช้ Microsoft Authenticator เสมอ (E57, 2026-11-14)
+- `V12__mfa_always.sql`: drop `dt_company_info.mfa_required` — ไม่มีตัวเลือกบังคับของบริษัทอีก
+- `POST /auth/login` รหัสผ่านถูก → `MfaChallenge` เสมอ (ไม่มี field `mfa` ใน body แล้ว); `POST /auth/signup` → `MfaChallenge` แบบ setup
+  (เข้าระบบได้หลังผูกเท่านั้น); ตัด `/me/mfa/*` (ผูกตอน login เท่านั้น, ปิดเองไม่ได้); `DELETE /users/{id}/mfa` คงไว้ (มือถือหาย)
+- test: `ApiTest.login()` / `passBothSteps()` ล้าง Authenticator ของผู้ใช้แล้วผ่านสองขั้น; e2e `call()` ทำขั้นรหัสแทนเมื่อ login / signup (case 3.15)
+
+### ขั้น 17 — เปลี่ยนเครื่อง Authenticator เอง + platform ล้างให้ผู้ใช้ร้าน (E58, 2026-11-14)
+- `POST /me/mfa/change { password, code }` (`OwnMfaService`): รหัสผ่าน (นับใน `LoginThrottle` แบบ `auth/verify`) → ยังไม่ผูก → รหัสของเครื่องเดิม
+  (ช่วงที่ใช้แล้วไม่รับ, นับผิดในตัวนับบัญชีเดียวกับ login) → `MfaChange { change, setup }`: `change` = JWT aud `mfa-change` 10 นาที, secret ใหม่
+  เข้ารหัส PiiCipher (AAD `mfa_change.secret:<tenant>`) อยู่ใน claim — ยังไม่บันทึก, เครื่องเดิมใช้ได้ต่อ
+- `POST /me/mfa/change/confirm { change, code }`: `change` ต้องเป็นของผู้ใช้ใน session; รหัสแรกของเครื่องใหม่ถูก → `MfaDao.replace()`; ส่งซ้ำ
+  (secret นี้ใช้อยู่แล้ว) / ถูกล้างไประหว่างนั้น → 400 "หมดเวลาเปลี่ยนเครื่อง กรุณาเริ่มใหม่"; audit `mfa_enable` "เปลี่ยนเครื่องจากหน้าตั้งค่า"
+- `POST /platform/companies/{id}/mfa-reset { username }` → body ว่าง: ไม่มีชื่อ → 400 "ไม่พบชื่อผู้ใช้นี้ในบริษัท", ยังไม่ผูก → 400; audit `mfa_reset`
+  `actorKind: platform` "ผู้ให้บริการล้าง Microsoft Authenticator ให้" — owner ทำมือถือหายและไม่มีผู้ดูแลระดับบริษัทคนอื่น
+- `RequestLogFilter`: ไม่ log body ของ `/me/mfa/**` (รหัส 6 หลัก + change)
+- ไม่มี migration · test: `MfaLoginIT` (เปลี่ยนเครื่อง), `PlatformCompanyIT` (ล้างให้)
+
 ## เรื่องที่ต้องถามผู้ใช้ระหว่างทาง (ไม่เดา)
 
 1. ~~ขั้น 2: จำกัด login ผิดต่อบัญชี / IP~~ — ตอบแล้ว 2026-10-22 (ขั้น 2)

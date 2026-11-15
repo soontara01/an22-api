@@ -112,6 +112,25 @@ class PlatformCompanyIT extends ApiTest {
   }
 
   @Test
+  void clearsAShopUsersAuthenticator() throws Exception {
+    String owner = login(c.code(), "owner", TestCompanies.PASSWORD); // ผูกตอน login
+    String url = "/platform/companies/" + c.id() + "/mfa-reset";
+    mvc.perform(as(platform, post(url), Map.of("username", "nobody")))
+        .andExpect(status().isBadRequest()).andExpect(content().json(message("ไม่พบชื่อผู้ใช้นี้ในบริษัท"), true));
+    mvc.perform(as(owner, post(url), Map.of("username", "owner"))).andExpect(status().isUnauthorized());
+    mvc.perform(as(platform, post(url), Map.of("username", " Owner "))).andExpect(status().isOk()).andExpect(content().string(""));
+    mvc.perform(as(platform, post(url), Map.of("username", "owner")))
+        .andExpect(status().isBadRequest()).andExpect(content().json(message("ผู้ใช้นี้ยังไม่ได้ผูก Microsoft Authenticator"), true));
+    mvc.perform(as(platform, post("/platform/companies/999999/mfa-reset"), Map.of("username", "owner"))).andExpect(status().isNotFound());
+    assertThat(platformAudit("mfa_reset"))
+        .containsExactly("platform|-|" + PLATFORM_NAME + "|owner|ผู้ให้บริการล้าง Microsoft Authenticator ให้");
+    // ล้างแล้ว = ผูกใหม่ตอน login
+    mvc.perform(post("/auth/login").contentType(MediaType.APPLICATION_JSON)
+            .content(JSON.writeValueAsString(Map.of("companyCode", c.code(), "username", "owner", "password", TestCompanies.PASSWORD))))
+        .andExpect(jsonPath("$.mfa").value("setup"));
+  }
+
+  @Test
   void payingTheOverdueInvoiceTurnsTheCompanyBackOn() throws Exception {
     LocalDate today = LocalDate.now(ClockConfig.BANGKOK);
     String no = String.format("SUB-1999%02d-%04d", c.id() / 10000 % 12 + 1, c.id() % 10000);

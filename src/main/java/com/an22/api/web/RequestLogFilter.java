@@ -70,6 +70,7 @@ public class RequestLogFilter extends OncePerRequestFilter {
       List.of(
           "/auth/**",
           "/platform/auth/**",
+          "/me/mfa/**",
           "/shifts/*/unlock",
           "/company/export",
           "/pos/held-bills",

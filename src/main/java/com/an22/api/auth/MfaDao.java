@@ -62,6 +62,17 @@ public class MfaDao {
         .update() == 1;
   }
 
+  /** E58: secret ของเครื่องใหม่แทนของเดิม (เปิดใช้แล้ว, ช่วงที่รหัสแรกใช้) — false = ไม่มีแถว (ถูกล้างไประหว่างนั้น). */
+  public boolean replace(Via via, long tenantId, long userId, byte[] secretEnc, long step) {
+    return jdbc(via).sql("UPDATE dt_user_mfa SET secret_enc = :s, confirmed_at = now(), last_step = :step"
+            + " WHERE tenant_id = :t AND user_id = :u AND confirmed_at IS NOT NULL")
+        .param("s", secretEnc)
+        .param("step", step)
+        .param("t", tenantId)
+        .param("u", userId)
+        .update() == 1;
+  }
+
   public boolean delete(Via via, long tenantId, long userId) {
     return jdbc(via).sql("DELETE FROM dt_user_mfa WHERE tenant_id = :t AND user_id = :u")
         .param("t", tenantId)

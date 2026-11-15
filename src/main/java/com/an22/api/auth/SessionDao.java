@@ -38,16 +38,14 @@ public class SessionDao {
       Subscription subscription,
       String name,
       String taxId,
-      boolean staffSeeCost,
-      /** E55: none / admins / all */
-      String mfaRequired) {}
+      boolean staffSeeCost) {}
 
   /** ผู้ใช้ + hash รหัสผ่าน (ไม่เคยออกนอก service). */
   public record UserRow(User user, String passwordHash) {}
 
   private static final String COMPANY =
       "SELECT c.id, c.code, c.active, c.suspended_reason, c.plan_id, c.purge_after, c.trial_ends_on, c.next_invoice_on,"
-          + " i.name, i.tax_id, i.staff_see_cost, i.mfa_required"
+          + " i.name, i.tax_id, i.staff_see_cost"
           + " FROM dt_companies c JOIN dt_company_info i ON i.tenant_id = c.id WHERE c.deleted_at IS NULL";
 
   private static final String USER = UserDao.SELECT + " WHERE u.tenant_id = :tenant";
@@ -134,8 +132,7 @@ public class SessionDao {
         new Subscription(rs.getObject("trial_ends_on", LocalDate.class), rs.getObject("next_invoice_on", LocalDate.class)),
         rs.getString("name"),
         rs.getString("tax_id"),
-        rs.getBoolean("staff_see_cost"),
-        rs.getString("mfa_required"));
+        rs.getBoolean("staff_see_cost"));
   }
 
   private static UserRow user(ResultSet rs, int i) throws SQLException {

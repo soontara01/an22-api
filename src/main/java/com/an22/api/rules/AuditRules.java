@@ -11,7 +11,6 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.function.Function;
@@ -115,9 +114,7 @@ public final class AuditRules {
       new Setting("ใช้ระบบกะ", CompanyInfo::requireShift, AuditRules::onOff),
       new Setting("ส่วนต่างที่ต้องให้ admin อนุมัติ", CompanyInfo::shiftVarianceLimit, v -> auditBaht((BigDecimal) v)),
       new Setting("เตือนเมื่อกะเปิดนานเกิน", CompanyInfo::shiftMaxHours, v -> plain(v) + " ชม."),
-      new Setting("ผู้ใช้ทั่วไปเห็นทุน / กำไร", CompanyInfo::staffSeeCost, AuditRules::onOff),
-      new Setting("บังคับ Microsoft Authenticator", CompanyInfo::mfaRequired,
-          v -> Map.of("none", "ไม่บังคับ", "admins", "เจ้าของ + ผู้ดูแล", "all", "ทุกคน").getOrDefault(String.valueOf(v), plain(v))));
+      new Setting("ผู้ใช้ทั่วไปเห็นทุน / กำไร", CompanyInfo::staffSeeCost, AuditRules::onOff));
 
   private static boolean same(Object a, Object b) {
     return a instanceof BigDecimal x && b instanceof BigDecimal y ? x.compareTo(y) == 0 : Objects.equals(a, b);

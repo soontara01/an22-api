@@ -42,7 +42,7 @@ check "claims ของ token ปกติ" "an22-api shop $U_OWNER $TENANT owne
   "$(jwt_part "$T_A" 1 | jq -r '[.iss, (.aud | if type == "array" then .[0] else . end), .sub, .tenantId, .role, .allBranches] | join(" ")')"
 
 case_id 4.3 "token ผิดฝั่ง"
-call POST /platform/auth/login '{"username":"platform","password":"platform"}'
+platform_login
 expect_status 200
 T_PLATFORM=$(jq -r .token <<<"$BODY")
 me_with "$T_PLATFORM"

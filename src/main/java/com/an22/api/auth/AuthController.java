@@ -5,6 +5,7 @@ import com.an22.api.auth.AuthService.MfaVerifyRequest;
 import com.an22.api.auth.AuthService.VerifyRequest;
 import com.an22.api.model.LoginResponse;
 import com.an22.api.model.LoginResult;
+import com.an22.api.model.MfaChallenge;
 import com.an22.api.model.Session;
 import com.an22.api.model.SignupPayload;
 import com.an22.api.model.User;
@@ -51,7 +52,7 @@ public class AuthController {
 
   /** สมัครใช้งาน (public) — สำเร็จ = login เป็น owner ทันที; ถี่เกิน → 429. */
   @PostMapping("/auth/signup")
-  LoginResponse signup(@RequestBody SignupPayload body, HttpServletRequest request) {
+  MfaChallenge signup(@RequestBody SignupPayload body, HttpServletRequest request) {
     return accounts.signup(body, ClientIp.of(request));
   }
 

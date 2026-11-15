@@ -54,8 +54,15 @@ public class JwtService {
   public static final String AUD_PLATFORM = "platform";
   /** E55: login ที่รอรหัส Microsoft Authenticator — ใช้แทน token ร้าน / platform ไม่ได้. */
   public static final String AUD_MFA = "mfa";
+  /** E56: login ของ platform admin ที่รอรหัส Authenticator. */
+  public static final String AUD_PLATFORM_MFA = "platform-mfa";
   /** อายุของ challenge (E55). */
   public static final Duration MFA_TTL = Duration.ofMinutes(5);
+  /** E58: เปลี่ยนเครื่อง Authenticator ที่รอรหัสแรกของเครื่องใหม่ — ใช้แทน token / challenge ไม่ได้. */
+  public static final String AUD_MFA_CHANGE = "mfa-change";
+  public static final Duration MFA_CHANGE_TTL = Duration.ofMinutes(10);
+  /** claim ของ {@link #AUD_MFA_CHANGE}: secret ใหม่ที่เข้ารหัสด้วย PiiCipher แล้ว (base64). */
+  public static final String CLAIM_SECRET = "secret";
   public static final String CLAIM_TENANT = "tenantId";
 
   private final NimbusJwtEncoder encoder;
@@ -63,6 +70,8 @@ public class JwtService {
   private final JwtDecoder shopDecoder;
   private final JwtDecoder platformDecoder;
   private final JwtDecoder mfaDecoder;
+  private final JwtDecoder platformMfaDecoder;
+  private final JwtDecoder mfaChangeDecoder;
   private final Duration ttl;
   private final Clock clock;
 
@@ -76,6 +85,8 @@ public class JwtService {
     this.shopDecoder = decoder(all, AUD_SHOP, clock);
     this.platformDecoder = decoder(all, AUD_PLATFORM, clock);
     this.mfaDecoder = decoder(all, AUD_MFA, clock);
+    this.platformMfaDecoder = decoder(all, AUD_PLATFORM_MFA, clock);
+    this.mfaChangeDecoder = decoder(all, AUD_MFA_CHANGE, clock);
     this.ttl = Duration.ofDays(props.jwt().ttlDays());
     this.clock = clock;
   }
@@ -92,6 +103,40 @@ public class JwtService {
   /** challenge ของขั้นรหัส Authenticator (E55): ผู้ใช้ + บริษัท อายุ {@link #MFA_TTL} — an22-web เก็บไว้ใน session เหมือน token. */
   public String issueMfa(long tenantId, long userId) {
     return encode(AUD_MFA, Long.toString(userId), Map.of(CLAIM_TENANT, tenantId), MFA_TTL);
+  }
+
+  /** challenge ของ platform admin (E56) อายุ {@link #MFA_TTL}. */
+  public String issuePlatformMfa(long adminId) {
+    return encode(AUD_PLATFORM_MFA, Long.toString(adminId), Map.of(), MFA_TTL);
+  }
+
+  /** E58: หลักฐานเปลี่ยนเครื่องของผู้ใช้ — {@code secretEnc} = secret ใหม่ที่เข้ารหัสแล้ว (base64). */
+  public String issueMfaChange(long tenantId, long userId, String secretEnc) {
+    return encode(AUD_MFA_CHANGE, Long.toString(userId), Map.of(CLAIM_TENANT, tenantId, CLAIM_SECRET, secretEnc), MFA_CHANGE_TTL);
+  }
+
+  /** ตรวจหลักฐานเปลี่ยนเครื่อง — ไม่ผ่าน = empty. */
+  public Optional<Jwt> decodeMfaChange(String token) {
+    if (token == null || token.isBlank()) {
+      return Optional.empty();
+    }
+    try {
+      return Optional.of(mfaChangeDecoder.decode(token));
+    } catch (JwtException e) {
+      return Optional.empty();
+    }
+  }
+
+  /** ตรวจ challenge ของ platform admin — ไม่ผ่าน = empty. */
+  public Optional<Jwt> decodePlatformMfa(String token) {
+    if (token == null || token.isBlank()) {
+      return Optional.empty();
+    }
+    try {
+      return Optional.of(platformMfaDecoder.decode(token));
+    } catch (JwtException e) {
+      return Optional.empty();
+    }
   }
 
   /** ตรวจ challenge — ไม่ผ่าน (ปลอม / หมดอายุ / token ชนิดอื่น / ไม่มี) = empty. */

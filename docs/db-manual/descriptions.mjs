@@ -19,7 +19,7 @@ export const domains = [
     soft: '#f3e5f5',
     intro:
       'ตารางของผู้ให้บริการ ไม่ใช่ข้อมูลของร้าน: ทะเบียนบริษัท (tenant), ผู้ดูแลแพลตฟอร์ม, ใบแจ้งหนี้ค่าบริการ, ลิงก์ตั้งรหัสผ่าน และตัวนับ login ผิด — ส่วนใหญ่ไม่มี `tenant_id` และใช้ผ่าน role `an22_platform` (BYPASSRLS) เท่านั้น; `dt_companies` / `dt_billing_invoices` เปิด RLS ให้ร้านอ่านแถวของตัวเองได้',
-    tables: ['dt_companies', 'dt_platform_admins', 'dt_billing_invoices', 'dt_platform_doc_counters', 'dt_password_reset_tokens', 'dt_login_throttle'],
+    tables: ['dt_companies', 'dt_platform_admins', 'dt_platform_admin_mfa', 'dt_billing_invoices', 'dt_platform_doc_counters', 'dt_password_reset_tokens', 'dt_login_throttle'],
   },
   {
     id: 'B',
@@ -216,6 +216,26 @@ export const tables = {
       password_hash: 'hash ของรหัสผ่าน (BCrypt) — ไม่เคยส่งออก API',
     },
   },
+  dt_platform_admin_mfa: {
+    title: 'Microsoft Authenticator ของผู้ดูแลแพลตฟอร์ม',
+    purpose:
+      'E56: platform admin ทุกคนต้อง login ด้วยรหัสผ่าน + รหัส 6 หลักจาก Microsoft Authenticator (TOTP RFC 6238) เสมอ — ตารางนี้เก็บ secret ของแต่ละคน',
+    lifecycle: [
+      'สร้าง (รอยืนยัน `confirmed_at` null): `POST /platform/auth/login` ครั้งแรกที่รหัสผ่านถูก — ลองใหม่ได้ secret เดิมจนกว่าจะยืนยัน',
+      'ยืนยัน: รหัสแรกที่ถูก (`POST /platform/auth/mfa/verify`) ตั้ง `confirmed_at`; ทุกครั้งที่ใช้รหัสตั้ง `last_step`',
+      'ลบ: มือถือหาย / เปลี่ยนเครื่อง — `scripts/platform-mfa-reset.sh <username>` บน server (ไม่มีหน้าจอ) แล้ว login ครั้งถัดไปผูกใหม่',
+    ],
+    rules: [
+      '1 แถวต่อ admin (PK `admin_id`); ไม่อยู่ใต้ RLS, an22_app ไม่มีสิทธิ์ — ใช้ผ่าน an22_platform เท่านั้น',
+      'รับรหัสของช่วงปัจจุบัน ±1 ช่วง และต้องมากกว่า `last_step` (UPDATE … WHERE last_step < :step — รหัสเดิมใช้ซ้ำไม่ได้)',
+    ],
+    columns: {
+      admin_id: 'ผู้ดูแลแพลตฟอร์ม → `dt_platform_admins`',
+      secret_enc: 'secret base32 (20 byte) เข้ารหัส AES-GCM ด้วย `PiiCipher` (AAD `dt_platform_admin_mfa.secret:<admin id>`)',
+      confirmed_at: 'เวลาที่ยืนยันด้วยรหัสแรก — null = ผูกยังไม่เสร็จ',
+      last_step: 'ช่วง 30 วินาที (unix time / 30) ของรหัสที่ใช้ล่าสุด — กันใช้รหัสซ้ำ',
+    },
+  },
   dt_billing_invoices: {
     title: 'ใบแจ้งหนี้ค่าบริการ SaaS',
     purpose: 'ใบแจ้งหนี้รายเดือนที่แพลตฟอร์มเรียกเก็บจากบริษัท — **ไม่ใช่เอกสารภาษีของร้าน** (E35); ใช้แสดงแถบเตือนค้างชำระ และระงับบริษัทที่เกินกำหนด',
@@ -304,8 +324,6 @@ export const tables = {
       shift_variance_limit: 'ส่วนต่างตอนปิดกะต่อช่องทางที่เกินนี้ (บาท) ต้องให้ admin อนุมัติ',
       shift_max_hours: 'เปิดกะนานเกินกี่ชั่วโมงให้เตือน (เตือนอย่างเดียว)',
       staff_see_cost: 'ให้ role user เห็นต้นทุน / กำไร (ค่าเริ่ม false — API ใส่ null ในทุกช่องทุนของ response) (E43)',
-      mfa_required:
-        'ใครต้อง login ด้วยรหัส Microsoft Authenticator (E55): `none` ไม่บังคับ (ผู้ใช้เลือกเอง) · `admins` owner + admin · `all` ทุกคน — มีผลตั้งแต่ login ครั้งถัดไป',
     },
   },
   dt_branches: {
@@ -365,11 +383,11 @@ export const tables = {
   dt_user_mfa: {
     title: 'Microsoft Authenticator ของผู้ใช้',
     purpose:
-      'login สองขั้น (E55): secret TOTP (RFC 6238) ของผู้ใช้ที่ผูกแอป Microsoft Authenticator — ผู้ใช้ที่มีแถวที่ยืนยันแล้ว (`User.mfaEnabled`) ต้องใส่รหัส 6 หลักทุกครั้งหลังรหัสผ่าน ไม่ว่าเข้าทาง `/auth/login` หรือ `/auth/login-mfa`',
+      'login สองขั้น (E55 / E57): ผู้ใช้ร้านทุกคนต้องใส่รหัส 6 หลักจากแอป Microsoft Authenticator ทุกครั้งหลังรหัสผ่าน — ตารางนี้เก็บ secret TOTP (RFC 6238) ของแต่ละคน (`User.mfaEnabled` = มีแถวที่ยืนยันแล้ว)',
     lifecycle: [
-      'สร้าง (รอยืนยัน `confirmed_at` null): login ทาง `/auth/login-mfa` / บริษัทบังคับ แต่ยังไม่ผูก หรือกดเปิดใช้ในหน้าตั้งค่า (`POST /me/mfa/setup`) — ลองใหม่ได้ secret เดิมจนกว่าจะยืนยัน',
-      'ยืนยัน: รหัสแรกที่ถูก (`POST /auth/mfa/verify` หรือ `/me/mfa/confirm`) ตั้ง `confirmed_at`; ทุกครั้งที่ใช้รหัสตั้ง `last_step`',
-      'ลบ: ผู้ใช้ปิดเอง (`POST /me/mfa/disable` + รหัสผ่าน, ถ้าบริษัทไม่บังคับ), admin ล้างให้เมื่อมือถือหาย (`DELETE /users/:id/mfa`), ลบผู้ใช้',
+      'สร้าง (รอยืนยัน `confirmed_at` null): login หรือสมัครใช้งานครั้งแรกที่ยังไม่ผูก — ลองใหม่ได้ secret เดิมจนกว่าจะยืนยัน',
+      'ยืนยัน: รหัสแรกที่ถูก (`POST /auth/mfa/verify`) ตั้ง `confirmed_at`; ทุกครั้งที่ใช้รหัสตั้ง `last_step`',
+      'ลบ: admin ล้างให้เมื่อมือถือหาย (`DELETE /users/:id/mfa` — ผูกใหม่ตอน login ครั้งถัดไป), ลบผู้ใช้; ผู้ใช้ปิดเองไม่ได้ (E57)',
     ],
     rules: [
       '1 แถวต่อผู้ใช้ (PK tenant + user)',
@@ -1182,7 +1200,7 @@ export const flows = [
       {
         table: 'dt_user_mfa',
         op: 'U',
-        text: 'ต้องใช้รหัส Authenticator (E55: `/auth/login-mfa`, ผู้ใช้เปิดใช้แล้ว หรือบริษัทบังคับ) → ยังไม่ออก token: ตอบ challenge (JWT aud=mfa 5 นาที) + secret ใหม่ที่รอยืนยันถ้ายังไม่ผูก; `POST /auth/mfa/verify` ตรวจรหัส ตั้ง `confirmed_at` / `last_step` แล้วจึง audit `login` + ออก token (ผิด = `login_failed` นับในตัวนับเดียวกับรหัสผ่าน)',
+        text: 'รหัสผ่านถูก → ขั้นรหัส Authenticator เสมอ (E57) ยังไม่ออก token: ตอบ challenge (JWT aud=mfa 5 นาที) + secret ใหม่ที่รอยืนยันถ้ายังไม่ผูก; `POST /auth/mfa/verify` ตรวจรหัส ตั้ง `confirmed_at` / `last_step` แล้วจึง audit `login` + ออก token (ผิด = `login_failed` นับในตัวนับเดียวกับรหัสผ่าน)',
       },
       { table: 'dt_billing_invoices', op: 'I', text: '`BillingService.catchUp` ออกใบแจ้งหนี้ที่ถึงรอบ / ระงับบริษัทที่ค้างเกินกำหนด (ดูหัวข้อ billing)' },
       { table: ['dt_branches', 'dt_pos_terminals', 'dt_company_info'], op: 'R', text: 'สาขาที่เข้าได้ + ข้อมูลของ session (`GET /me` อ่านชุดเดียวกันทุกครั้งที่โหลดหน้า)' },

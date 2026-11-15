@@ -2,81 +2,73 @@ package com.an22.api.auth;
 
 import com.an22.api.audit.Audit;
 import com.an22.api.auth.SessionDao.Via;
-import com.an22.api.company.CompanyInfoDao;
-import com.an22.api.model.MfaSetup;
+import com.an22.api.model.MfaChange;
 import com.an22.api.model.User;
 import com.an22.api.rules.MfaRules;
 import com.an22.api.web.ApiException;
+import java.util.List;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * ผู้ใช้เปิด / ปิด Microsoft Authenticator ของตัวเองจากหน้าตั้งค่า (E55, {@code handleOwnMfa()} ของ mock) — appTx ของ session.
+ * ผู้ใช้เปลี่ยนเครื่อง Microsoft Authenticator ของตัวเองจากหน้าตั้งค่า (E58, {@code handleOwnMfa()} ของ mock) — appTx ของ session:
+ * รหัสผ่าน + รหัสของเครื่องเดิม (นับผิดใน {@link LoginThrottle} บัญชีเดียวกับ login) → QR ของเครื่องใหม่ → รหัสแรกของเครื่องใหม่แทน secret.
  */
 @Service
 public class OwnMfaService {
 
-  static final String ALREADY_ON = "เปิดใช้ Microsoft Authenticator อยู่แล้ว";
-  static final String NO_PENDING = "กรุณาเริ่มตั้งค่า Microsoft Authenticator ใหม่";
-  static final String WRONG_PASSWORD = "รหัสผ่านไม่ถูกต้อง";
-
   private final MfaService mfa;
   private final SessionDao sessions;
-  private final CompanyInfoDao company;
   private final AuthService auth;
+  private final LoginThrottle throttle;
   private final Audit audit;
 
-  OwnMfaService(MfaService mfa, SessionDao sessions, CompanyInfoDao company, AuthService auth, Audit audit) {
+  OwnMfaService(MfaService mfa, SessionDao sessions, AuthService auth, LoginThrottle throttle, Audit audit) {
     this.mfa = mfa;
     this.sessions = sessions;
-    this.company = company;
     this.auth = auth;
+    this.throttle = throttle;
     this.audit = audit;
   }
 
-  /** {@code POST /me/mfa/setup}: secret ที่รอยืนยัน (เดิมถ้ามี). */
+  /** {@code POST /me/mfa/change { password, code }}: ลำดับข้อผิดตาม mock — รหัสผ่าน, ยังไม่ผูก, รหัสของเครื่องเดิม. */
   @Transactional
-  public MfaSetup setup(ShopSession s) {
-    if (s.user().mfaEnabled()) {
-      throw ApiException.badRequest(ALREADY_ON);
+  public MfaChange start(ShopSession s, String password, String code, String ip) {
+    if (auth.credentials(s, s.user().username(), password, ip).isEmpty()) {
+      throw ApiException.badRequest(MfaRules.WRONG_PASSWORD);
     }
-    return mfa.pendingSetup(Via.APP, s.tenantId(), s.companyCode(), s.user());
-  }
-
-  /** {@code POST /me/mfa/confirm { code }}: รหัสแรกที่ถูกเปิดใช้. */
-  @Transactional
-  public User confirm(ShopSession s, String code) {
-    if (s.user().mfaEnabled()) {
-      throw ApiException.badRequest(ALREADY_ON);
+    if (!s.user().mfaEnabled()) {
+      throw ApiException.badRequest(MfaRules.NOT_SET);
     }
-    if (!mfa.hasPending(Via.APP, s.tenantId(), s.user().id())) {
-      throw ApiException.badRequest(NO_PENDING);
+    List<ThrottleKey> keys = List.of(ThrottleKey.shop(s.companyCode(), s.user().username()), ThrottleKey.ip(ip));
+    throttle.attempt(keys);
+    boolean used;
+    try {
+      used = mfa.use(Via.APP, s.tenantId(), s.user().id(), code == null ? "" : code);
+    } catch (RuntimeException e) {
+      throttle.passed(keys, false);
+      throw e;
     }
-    if (!mfa.use(Via.APP, s.tenantId(), s.user().id(), code)) {
+    if (!used) {
+      // สิทธิ์ที่จองนับเป็นความผิด
       throw ApiException.badRequest(MfaRules.WRONG_CODE);
     }
-    audit.record(s, "mfa_enable", null, "user", s.user().id(), s.user().username(), "เปิดใช้จากหน้าตั้งค่า");
-    return me(s);
+    throttle.passed(keys, false);
+    return mfa.startChange(s.tenantId(), s.companyCode(), s.user());
   }
 
-  /**
-   * {@code POST /me/mfa/disable { password }}: รหัสผ่านของตัวเอง (นับผิดใน LoginThrottle เหมือน auth/verify) แล้ว {@code mfaDisableError()}.
-   */
+  /** {@code POST /me/mfa/change/confirm { change, code }}: รหัสแรกของเครื่องใหม่ → audit {@code mfa_enable}. */
   @Transactional
-  public User disable(ShopSession s, String password, String ip) {
-    if (auth.credentials(s, s.user().username(), password, ip).isEmpty()) {
-      throw ApiException.badRequest(WRONG_PASSWORD);
+  public User confirm(ShopSession s, String change, String code) {
+    String secret = mfa.changeSecret(change, s.tenantId(), s.user().id());
+    if (secret == null) {
+      throw ApiException.badRequest(MfaRules.CHANGE_EXPIRED);
     }
-    String problem = MfaRules.mfaDisableError(s.user().role(), s.user().mfaEnabled(), company.get().mfaRequired());
+    String problem = mfa.finishChange(Via.APP, s.tenantId(), s.user().id(), secret, code == null ? "" : code);
     if (problem != null) {
       throw ApiException.badRequest(problem);
     }
-    mfa.remove(Via.APP, s.tenantId(), s.user().id());
-    audit.record(s, "mfa_disable", null, "user", s.user().id(), s.user().username(), "ปิดใช้จากหน้าตั้งค่า");
-    return me(s);
-  }
-
-  private User me(ShopSession s) {
+    audit.record(s, "mfa_enable", null, "user", s.user().id(), s.user().username(), "เปลี่ยนเครื่องจากหน้าตั้งค่า");
     return sessions.userById(Via.APP, s.tenantId(), s.user().id()).map(SessionDao.UserRow::user).orElseThrow();
   }
 }

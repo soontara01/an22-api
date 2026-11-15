@@ -20,6 +20,8 @@ public class PlatformCompanyController {
 
   public record OwnerPassword(String password) {}
 
+  public record MfaReset(String username) {}
+
   private final PlatformCompanyService service;
 
   PlatformCompanyController(PlatformCompanyService service) {
@@ -55,6 +57,12 @@ public class PlatformCompanyController {
   @PutMapping("/platform/companies/{id}/owner-password")
   void ownerPassword(PlatformAdmin admin, @PathVariable long id, @RequestBody OwnerPassword body) {
     service.ownerPassword(admin, id, body.password());
+  }
+
+  /** E58: ตอบ body ว่าง. */
+  @PostMapping("/platform/companies/{id}/mfa-reset")
+  void mfaReset(PlatformAdmin admin, @PathVariable long id, @RequestBody MfaReset body) {
+    service.resetUserMfa(admin, id, body.username());
   }
 
   @PostMapping("/platform/companies/{id}/purge")
