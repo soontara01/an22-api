@@ -98,7 +98,7 @@ rand_ip() { echo "10.$((E2E_STEP % 256)).$((RANDOM % 256)).$((RANDOM % 254 + 1))
 
 # call [@api1|@api2] METHOD PATH [BODY|-] [HEADER…]
 # ร้าน (E57): ทุก login ต้องผ่านรหัส Microsoft Authenticator — call ทำแทนผู้ใช้ที่ถือมือถือ: ก่อน POST /auth/login ล้าง Authenticator ของผู้ใช้นั้น
-# (ได้ setup + secret ทุกครั้ง) และเมื่อ /auth/login หรือ /auth/signup ตอบ setup ก็ส่งรหัสต่อเอง → $STATUS / $BODY = ของ /auth/mfa/verify
+# (ได้ setup + secret ทุกครั้ง) และเมื่อ /auth/login ตอบ setup ก็ส่งรหัสต่อเอง → $STATUS / $BODY = ของ /auth/mfa/verify
 # (session + token เหมือน login เดิม). E2E_RAW_LOGIN=1 = ไม่ทำแทน (ดูคำตอบขั้นรหัสผ่านตรง ๆ)
 call() {
   local base=$LB tag=@lb
@@ -111,7 +111,7 @@ call() {
   shift 2
   [[ $# -gt 0 ]] && shift
   local auto_mfa=false
-  if [[ "$method" == POST && ( "$path" == /auth/login || "$path" == /auth/signup ) && -z "${E2E_RAW_LOGIN:-}" ]]; then
+  if [[ "$method" == POST && "$path" == /auth/login && -z "${E2E_RAW_LOGIN:-}" ]]; then
     auto_mfa=true
     if [[ "$path" == /auth/login && "$body" != - ]]; then
       local who
@@ -139,7 +139,7 @@ call() {
   fi
   STATUS=$(curl "${args[@]}" "$base$path" || true)
   BODY=$(cat "$E2E_WORK/body" 2>/dev/null || true)
-  # token ที่ออกให้ (signup / login) — finish ค้นว่าไม่หลุดไป log
+  # token ที่ออกให้ (login) — finish ค้นว่าไม่หลุดไป log
   local tok
   tok=$(jq -r 'objects | .token // empty' <<<"$BODY" 2>/dev/null || true)
   [[ -n "$tok" ]] && echo "$tok" >>"$E2E_TOKENS"
@@ -159,6 +159,35 @@ call() {
     fi
   fi
   return 0
+}
+
+# signup_company [@api1|@api2] BODY [HEADER…] — บริษัทใหม่ (E59: ไม่มี /auth/signup แล้ว สร้างได้ทางเดียวคือ platform): BODY รูปแบบ signup เดิม
+# (owner.password = รหัสที่จะตั้ง) → platform_login → POST /platform/companies (ตัด owner.password) → ใช้ลิงก์ตั้งรหัสผ่าน (setupLink) →
+# login owner (ผูก Authenticator ให้) — $STATUS / $BODY = ของ login ({token, user, company, branches}) เหมือน signup เดิม;
+# สร้างไม่ผ่าน = $STATUS / $BODY ของ POST /platform/companies. คืน E2E_TOKEN / สาขา / เครื่องเดิมเสมอ
+signup_company() {
+  local at=()
+  [[ "${1:-}" == @api* ]] && { at=("$1"); shift; }
+  local body=$1
+  shift
+  local saved=$E2E_TOKEN saved_branch=$E2E_BRANCH saved_terminal=$E2E_TERMINAL password token code username
+  password=$(jq -r '.owner.password // ""' <<<"$body")
+  E2E_BRANCH="" E2E_TERMINAL=""
+  platform_login "${at[@]}"
+  E2E_TOKEN=$(jq -r '.token // empty' <<<"$BODY")
+  call "${at[@]}" POST /platform/companies "$(jq -c 'del(.owner.password)' <<<"$body")" "$@"
+  E2E_TOKEN=""
+  if [[ "$STATUS" == 200 ]]; then
+    token=$(jq -r '.setupLink.path | sub("^.*[?]token="; "")' <<<"$BODY")
+    code=$(jq -r .company.code <<<"$BODY")
+    username=$(jq -r .company.owner.username <<<"$BODY")
+    E2E_EXTRA_SECRETS+=" $token"
+    call "${at[@]}" POST /auth/reset-password "$(jq -nc --arg t "$token" --arg p "$password" '{token:$t, password:$p}')" "$@"
+    if [[ "$STATUS" == 200 ]]; then
+      call "${at[@]}" POST /auth/login "$(jq -nc --arg c "$code" --arg u "$username" --arg p "$password" '{companyCode:$c, username:$u, password:$p}')" "$@"
+    fi
+  fi
+  E2E_TOKEN=$saved E2E_BRANCH=$saved_branch E2E_TERMINAL=$saved_terminal
 }
 
 # login CODE USER PASS [HEADER…] → $TOKEN (ว่าง = ไม่ผ่าน), $STATUS / $BODY ของ /auth/login
@@ -306,13 +335,13 @@ std_ok() {
 }
 
 # std_company TAG [plan] → CODE TENANT BR_HQ BR_BN U_OWNER U_BOSS U_MGR U_CASH1 U_CASH2 PM_CASH PM_CARD PM_QR PM_TRANSFER
-#   CAT_IT CAT_MOUSE CAT_NB CAT_CBL CAT_SVC P_MS P_NB P_CBL P_SVC P_EXM, T_OWNER (token ของ signup); รหัส owner1234 / pass1234
+#   CAT_IT CAT_MOUSE CAT_NB CAT_CBL CAT_SVC P_MS P_NB P_CBL P_SVC P_EXM, T_OWNER (token ของ owner — signup_company); รหัส owner1234 / pass1234
 std_company() {
   local tag=$1 plan=${2:-pro} saved_token=$E2E_TOKEN saved_branch=$E2E_BRANCH saved_terminal=$E2E_TERMINAL
   CODE="E${tag#E}$(openssl rand -hex 2 | tr a-f A-F)"
   local lower=${CODE,,}
   E2E_TOKEN="" E2E_BRANCH="" E2E_TERMINAL=""
-  call POST /auth/signup "$(jq -nc --arg code "$CODE" --arg plan "$plan" --arg email "owner@$lower.e2e.test" '{
+  signup_company "$(jq -nc --arg code "$CODE" --arg plan "$plan" --arg email "owner@$lower.e2e.test" '{
     companyCode:$code, companyName:("บริษัท ทดสอบ " + $code), taxId:"0105550123451", vatRegistered:true,
     branch:{code:"HQ", name:"สำนักงานใหญ่", branchNo:"00000", address:"1 ถนนสุขุมวิท กรุงเทพฯ", phone:"021234567"},
     owner:{name:"คุณเจ้าของ", username:"owner", email:$email, password:"owner1234"}, planId:$plan}')"

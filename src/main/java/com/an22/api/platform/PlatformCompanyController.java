@@ -1,7 +1,10 @@
 package com.an22.api.platform;
 
+import com.an22.api.model.NewCompanyPayload;
+import com.an22.api.model.NewCompanyResult;
 import com.an22.api.model.PlatformAdmin;
 import com.an22.api.model.PlatformCompany;
+import com.an22.api.model.SetupLink;
 import java.util.List;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -18,8 +21,6 @@ public class PlatformCompanyController {
 
   public record Suspend(String note) {}
 
-  public record OwnerPassword(String password) {}
-
   public record MfaReset(String username) {}
 
   private final PlatformCompanyService service;
@@ -31,6 +32,12 @@ public class PlatformCompanyController {
   @GetMapping("/platform/companies")
   List<PlatformCompany.Row> list(PlatformAdmin admin) {
     return service.list();
+  }
+
+  /** E59: ทางเดียวที่สร้างบริษัท (ไม่มี {@code /auth/signup} แล้ว) — คืนหน้าบริษัท + ลิงก์ตั้งรหัสผ่านของ owner. */
+  @PostMapping("/platform/companies")
+  NewCompanyResult create(PlatformAdmin admin, @RequestBody NewCompanyPayload body) {
+    return service.create(admin, body);
   }
 
   @GetMapping("/platform/companies/{id}")
@@ -53,10 +60,10 @@ public class PlatformCompanyController {
     return service.reactivate(admin, id);
   }
 
-  /** ตอบ body ว่าง. */
-  @PutMapping("/platform/companies/{id}/owner-password")
-  void ownerPassword(PlatformAdmin admin, @PathVariable long id, @RequestBody OwnerPassword body) {
-    service.ownerPassword(admin, id, body.password());
+  /** E59: ลิงก์ตั้งรหัสผ่านใหม่ของ owner (แทน {@code PUT …/owner-password}). */
+  @PostMapping("/platform/companies/{id}/owner-setup-link")
+  SetupLink ownerSetupLink(PlatformAdmin admin, @PathVariable long id) {
+    return service.ownerSetupLink(admin, id);
   }
 
   /** E58: ตอบ body ว่าง. */

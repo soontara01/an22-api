@@ -105,7 +105,7 @@ expect_sql "SELECT count(*) || ':' || coalesce(sum(total), 0) FROM dt_credit_not
 
 case_id 34.5 "starter: เพิ่มผู้ใช้ 5 request เมื่อเหลือที่ 1"
 S_CODE="E34S$(openssl rand -hex 2 | tr a-f A-F)"
-call POST /auth/signup "$(jq -nc --arg c "$S_CODE" '{companyCode:$c, companyName:"starter", taxId:"", vatRegistered:false,
+signup_company "$(jq -nc --arg c "$S_CODE" '{companyCode:$c, companyName:"starter", taxId:"", vatRegistered:false,
   branch:{code:"HQ", name:"สำนักงานใหญ่", branchNo:"00000", address:"กรุงเทพฯ", phone:""},
   owner:{name:"เจ้าของ", username:"owner", email:("owner@" + ($c | ascii_downcase) + ".e2e.test"), password:"owner1234"}, planId:"starter"}')"
 T_S=$(jq -r .token <<<"$BODY"); S_HQ=$(jq -r '.branches[0].id' <<<"$BODY"); S=$(sql "SELECT id FROM dt_companies WHERE code = '$S_CODE'")

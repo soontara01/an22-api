@@ -90,7 +90,7 @@ check() {
   fi
   if $ok; then
     echo
-    echo "พร้อมใช้: $base_url/platform/login (ผู้ดูแลแพลตฟอร์ม) · $base_url/auth/signup (สมัครบริษัทแรก)"
+    echo "พร้อมใช้: $base_url/platform/login (ผู้ดูแลแพลตฟอร์ม — สร้างบริษัทแรกที่ /platform/companies/new แล้วส่งลิงก์ตั้งรหัสผ่านให้เจ้าของ)"
   fi
   $ok
 }

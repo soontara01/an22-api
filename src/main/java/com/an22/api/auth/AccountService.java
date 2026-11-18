@@ -5,8 +5,6 @@ import com.an22.api.audit.AuditEntry;
 import com.an22.api.auth.SessionDao.Via;
 import com.an22.api.db.ActorDao;
 import com.an22.api.db.TxActor;
-import com.an22.api.model.MfaChallenge;
-import com.an22.api.model.SignupPayload;
 import com.an22.api.model.User;
 import com.an22.api.rules.CompanyRules;
 import com.an22.api.rules.SignupRules;
@@ -23,17 +21,14 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * บัญชีที่ทำก่อนมี session (public chain): สมัครใช้งาน (E37), ลืมรหัสผ่าน / ตั้งรหัสด้วยลิงก์ของ owner (E41) — ตาม mock. signup / forgot นับครั้ง
+ * บัญชีที่ทำก่อนมี session (public chain): ลืมรหัสผ่าน / ตั้งรหัสด้วยลิงก์ของ owner (E41 / E59 — ไม่มีสมัครเองแล้ว) — ตาม mock. forgot นับครั้ง
  * ({@link LoginThrottle}) ก่อนแล้วจึงเปิด platformTx ใน {@link AccountTx} (ไม่ซ้อน — B5).
  */
 @Service
 public class AccountService {
 
-  public static final String CODE_TAKEN = "รหัสบริษัทนี้ถูกใช้แล้ว";
   public static final String INVALID_LINK = "ลิงก์ตั้งรหัสผ่านไม่ถูกต้อง หมดอายุ หรือใช้ไปแล้ว — ขอลิงก์ใหม่";
 
-  /** สมัครใช้งานต่อ IP ใน 15 นาที (นับทุกครั้ง — กันสร้างบริษัทรัว / ไล่เดารหัสบริษัทที่มีอยู่). */
-  static final int SIGNUP_IP_MAX = 10;
   /** ลืมรหัสผ่านต่อ IP / ต่อรหัสบริษัท + อีเมล ใน 15 นาที (กันยิงอีเมลใส่ owner). */
   static final int FORGOT_IP_MAX = 10;
   static final int FORGOT_ACCOUNT_MAX = 3;
@@ -68,15 +63,6 @@ public class AccountService {
   public record Message(String message) {}
 
   /**
-   * {@code POST /auth/signup}: บริษัททดลองใช้ {@code TRIAL_DAYS} วันของแพ็กเกจที่เลือก + ข้อมูลบริษัท, สาขาแรก, owner, ช่องทางเงินสด — แล้ว login
-   * เป็น owner หลังผูก Microsoft Authenticator (ตอบ {@link MfaChallenge} แบบ setup — E57). รหัสเคยใช้ (รวมบริษัทที่ลบแล้ว) → 400. เกิน {@link #SIGNUP_IP_MAX} ครั้ง / IP → 429.
-   */
-  public MfaChallenge signup(SignupPayload in, String ip) {
-    limit(Map.of(new ThrottleKey("ip", "signup:" + ip), SIGNUP_IP_MAX));
-    return tx.signup(in);
-  }
-
-  /**
    * {@code POST /auth/forgot-password}: ตอบข้อความเดียวเสมอ — รหัสบริษัท + อีเมลตรงกับ owner ที่ใช้งานอยู่ → ลิงก์ใช้ครั้งเดียว อายุ
    * {@code RESET_LINK_MINUTES} นาที ทางอีเมล. เก็บแค่ HMAC ของ token; ลิงก์ขึ้นต้นด้วย {@code APP_BASE_URL} (ไม่ใช่ header Host).
    * เกินเพดานต่อ IP / ต่อรหัสบริษัท + อีเมลที่พิมพ์ (นับแม้ไม่มีจริง — 429 ไม่บอกว่ามีหรือไม่) → 429.
@@ -98,7 +84,10 @@ public class AccountService {
     throttle.count(maxByKey);
   }
 
-  /** {@code POST /auth/reset-password}: ลิงก์ใช้ได้ครั้งเดียวก่อนหมดอายุ ของ owner ที่ยังใช้งานอยู่ในบริษัทที่ยังไม่ถูกลบ. */
+  /**
+   * {@code POST /auth/reset-password}: ลิงก์ใช้ได้ครั้งเดียวก่อนหมดอายุ ของ owner ที่ยังใช้งานอยู่ในบริษัทที่ยังไม่ถูกลบ — ลิงก์ลืมรหัส (reset, E41)
+   * หรือลิงก์ตั้งรหัสครั้งแรกจาก platform (setup, E59; audit {@code password_set}).
+   */
   @Transactional("platformTx")
   public void resetPassword(ResetPasswordRequest req) {
     Optional<AccountDao.ResetLink> found = req.token() == null || req.token().isEmpty()
@@ -116,7 +105,9 @@ public class AccountService {
     actors.becomeOnPlatform(TxActor.user(link.companyId(), user.id()));
     dao.setPassword(link.companyId(), user.id(), passwords.encode(req.password()));
     dao.useResetToken(link.id(), now);
-    audit.insertOnPlatform(new AuditEntry(link.companyId(), "user", user.id(), user.name(), null, null, "password_reset", "user", user.id(),
-        user.username(), "ตั้งรหัสผ่านใหม่ด้วยลิงก์ทางอีเมล"));
+    boolean setup = "setup".equals(link.kind());
+    audit.insertOnPlatform(new AuditEntry(link.companyId(), "user", user.id(), user.name(), null, null,
+        setup ? "password_set" : "password_reset", "user", user.id(), user.username(),
+        setup ? "ตั้งรหัสผ่านด้วยลิงก์จากผู้ให้บริการ" : "ตั้งรหัสผ่านใหม่ด้วยลิงก์ทางอีเมล"));
   }
 }

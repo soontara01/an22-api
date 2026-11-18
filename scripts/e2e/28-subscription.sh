@@ -70,7 +70,7 @@ check "std (รวมที่ปิด) = DB" "$(sql "SELECT (SELECT count(*) F
 check "std = 3 5 5 5 5" "3 5 5 5 5" "$(num .terminals) $(num .categories) $(num .products) $(num .prices) $(num .users)"
 N_CODE="E28N$(openssl rand -hex 2 | tr a-f A-F)"
 as -
-call POST /auth/signup "$(jq -nc --arg c "$N_CODE" '{companyCode:$c, companyName:"บริษัทใหม่", taxId:"", vatRegistered:false,
+signup_company "$(jq -nc --arg c "$N_CODE" '{companyCode:$c, companyName:"บริษัทใหม่", taxId:"", vatRegistered:false,
   branch:{code:"HQ", name:"สำนักงานใหญ่", branchNo:"00000", address:"กรุงเทพฯ", phone:""},
   owner:{name:"เจ้าของ", username:"owner", email:("owner@" + ($c | ascii_downcase) + ".e2e.test"), password:"owner1234"}, planId:"starter"}')"
 as "$(jq -r .token <<<"$BODY")"

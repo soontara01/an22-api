@@ -14,7 +14,7 @@ due_now() { sql "UPDATE dt_companies SET trial_ends_on = current_date - 1, next_
 signup() { # tag → $S_CODE $S_ID $S_TOKEN
   S_CODE="E31$1$(openssl rand -hex 2 | tr a-f A-F)"
   local saved=$E2E_TOKEN; as -
-  call POST /auth/signup "$(jq -nc --arg c "$S_CODE" '{companyCode:$c, companyName:("บริษัท " + $c), taxId:"", vatRegistered:false,
+  signup_company "$(jq -nc --arg c "$S_CODE" '{companyCode:$c, companyName:("บริษัท " + $c), taxId:"", vatRegistered:false,
     branch:{code:"HQ", name:"สำนักงานใหญ่", branchNo:"00000", address:"กรุงเทพฯ", phone:""},
     owner:{name:"เจ้าของ", username:"owner", email:("owner@" + ($c | ascii_downcase) + ".e2e.test"), password:"owner1234"}, planId:"pro"}')"
   S_TOKEN=$(jq -r .token <<<"$BODY"); S_ID=$(sql "SELECT id FROM dt_companies WHERE code = '$S_CODE'"); E2E_TOKEN=$saved

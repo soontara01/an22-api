@@ -7,7 +7,7 @@ import java.util.List;
 
 /**
  * {@code PlatformCompanyRow} / {@code PlatformCompanyDetail} (platform.model.ts, E36) — รายการใช้ {@link Row}, หน้าบริษัทใช้ {@link Detail}
- * (= Row + ใบแจ้งหนี้ใหม่สุดก่อน, owner, เหตุผลที่ระงับ).
+ * (= Row + ใบแจ้งหนี้ใหม่สุดก่อน, owner, owner ตั้งรหัสผ่านแล้วหรือยัง, เหตุผลที่ระงับ).
  */
 public final class PlatformCompany {
 
@@ -23,11 +23,12 @@ public final class PlatformCompany {
   public record Detail(
       long id, String code, String name, String taxId, String planId, boolean active, String suspendedReason, String status,
       PlanRules.Usage usage, Subscription subscription, BigDecimal openAmount, Instant deletedAt, CompanyDeletion deletion,
-      List<BillingInvoice> invoices, Owner owner, String suspendNote) {
+      List<BillingInvoice> invoices, Owner owner, boolean ownerPasswordSet, String suspendNote) {
 
-    public static Detail of(Row r, List<BillingInvoice> newestFirst, Owner owner, String suspendNote) {
+    /** @param ownerPasswordSet E59: false = owner ยังไม่ได้ตั้งรหัสผ่านจากลิงก์ */
+    public static Detail of(Row r, List<BillingInvoice> newestFirst, Owner owner, boolean ownerPasswordSet, String suspendNote) {
       return new Detail(r.id(), r.code(), r.name(), r.taxId(), r.planId(), r.active(), r.suspendedReason(), r.status(), r.usage(),
-          r.subscription(), r.openAmount(), r.deletedAt(), r.deletion(), newestFirst, owner, suspendNote);
+          r.subscription(), r.openAmount(), r.deletedAt(), r.deletion(), newestFirst, owner, ownerPasswordSet, suspendNote);
     }
   }
 }

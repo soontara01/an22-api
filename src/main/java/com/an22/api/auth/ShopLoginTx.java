@@ -154,7 +154,9 @@ class ShopLoginTx {
       passwords.matches(raw, dummyHash);
       return Optional.empty();
     }
-    boolean match = passwords.matches(raw, row.get().passwordHash());
+    String hash = row.get().passwordHash();
+    // ยังไม่ตั้งรหัสผ่าน (owner ของบริษัทที่ platform สร้าง — E59): ไม่ผ่านเสมอ, ใช้เวลาเท่ากับตรวจจริง
+    boolean match = passwords.matches(raw, hash == null ? dummyHash : hash) && hash != null;
     return match && row.get().user().active() ? Optional.of(row.get().user()) : Optional.empty();
   }
 }

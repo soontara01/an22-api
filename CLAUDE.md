@@ -63,8 +63,8 @@ src/main/java/com/an22/api/
                  ListLimits, ShiftRules, SaleRules, TaxInvoiceRules, CreditNoteRules, ExchangeRules, AuditRules, SignupRules, CompanyDataRules, PlatformRules)
   health/        /healthz, /readyz, ShutdownDrain (SmartLifecycle ก่อน graceful — B7) (HealthService ใช้ TransactionTemplate ใน try — `@Transactional` ขอ connection ก่อนเข้า method จับ error ไม่ได้ → 500, B1)
   auth/          login / verify / me (AuthController → AuthService → ShopLoginTx / SessionService → SessionDao), LoginThrottle (+ Dao), ShopSession, PasswordResetTokens,
-                 signup / forgot-password / reset-password (AccountService → AccountTx → AccountDao, platformTx)
-  platform/      /platform/auth/login, /platform/me, /platform/companies/* + /platform/invoices/:id/pay (PlatformCompanyService → PlatformCompanyDao,
+                 forgot-password / reset-password (AccountService → AccountTx → AccountDao, platformTx); PasswordResetTokens.issueSetup (ลิงก์ setup E59)
+  platform/      /platform/auth/login, /platform/me, /platform/companies/* (สร้างบริษัท E59 — NewCompanyDao, ลิงก์ owner-setup-link) + /platform/invoices/:id/pay (PlatformCompanyService → PlatformCompanyDao,
                  audit actor platform; purge ลบทุกตารางที่มี tenant_id ตาม FK — ไม่มี /platform/outbox)
   branch/        /branches
   masterdata/    /categories, /suppliers, /payment-methods (+ order)
@@ -107,23 +107,23 @@ src/test/java/com/an22/api/
 - GET ใช้ `@Transactional(readOnly = true)` → PostgreSQL `READ ONLY` (enforceReadOnly เปิดแล้ว); ห้ามเรียก `@Transactional` method ใน class เดียวกัน; งานที่ต้องบันทึกแม้ request ล้ม = `REQUIRES_NEW`
 - **ห้ามเรียก `REQUIRES_NEW` บน tx manager เดียวกันจากใน transaction ที่เปิดอยู่** (1 request ใช้ 2 connection จาก pool เดียวกัน → พร้อมกันเท่าขนาด pool = pool ติดตาย 30 วิ — B5):
   endpoint ที่นับ `LoginThrottle` / `BillingService.catchUp` (platformTx) ใช้ method ที่ไม่ `@Transactional` คุมลำดับ แล้วเรียก transaction สั้น ๆ ต่อกัน
-  (`AuthService.login` → `ShopLoginTx`, `PlatformAuthService.login` → `PlatformLoginTx`, `AccountService.signup/forgotPassword` → `AccountTx`); ข้าม pool (appTx → platform) ได้ — test `ThrottleConcurrencyIT`
+  (`AuthService.login` → `ShopLoginTx`, `PlatformAuthService.login` → `PlatformLoginTx`, `AccountService.forgotPassword` → `AccountTx`); ข้าม pool (appTx → platform) ได้ — test `ThrottleConcurrencyIT`
 - ขั้น 2: `TenantTransactionManager` ตั้ง `app.tenant_id` / `app.user_id` / `app.actor_kind` (SET LOCAL) ทุก transaction, TxGuard (query นอก transaction → error)
 
 ## Request ของร้าน / platform (ขั้น 2)
 
 - 3 chain: public (`/healthz`, `/readyz`, `POST /auth/login`, `POST /platform/auth/login`) · `/platform/**` (token aud `platform`) · ที่เหลือ = ร้าน (aud `shop`)
-  — endpoint public ใหม่ (signup, ลืมรหัสผ่าน) ต้องเพิ่มใน `SecurityConfig.PUBLIC_PATHS`
+  — endpoint public ใหม่ (เช่น ลืมรหัสผ่าน) ต้องเพิ่มใน `SecurityConfig.PUBLIC_PATHS`; **ไม่มีสมัครเองแล้ว** (E59 — บริษัทใหม่ = `POST /platform/companies` เท่านั้น)
 - `ShopSessionFilter` อ่านผู้ใช้ + บริษัทจาก DB ทุก request (ไม่ผ่าน → 401), ตั้ง `TxActor` (ทุก transaction ของ request ได้ RLS ของบริษัทนี้), ตรวจรอลบ (403) / `X-Branch-Id` (403)
   — controller รับ `ShopSession`, `BranchContext`, `TerminalContext` (หรือ `PlatformAdmin`) เป็น parameter; งานเขียนสต็อก / ขาย / กะเรียก `branch.require()` (400)
 - endpoint ของร้านที่แก้ตาราง platform (แพ็กเกจ, คำขอลบ) = `@Transactional("platformTx")` + ระบุบริษัทจาก `ShopSession` เอง (BYPASSRLS)
 - tenant มาจาก token เท่านั้น — ห้ามรับ tenant จาก URL / query / body; สิทธิ์ / สาขาใช้ของ `ShopSession` (DB) ไม่ใช่ claims
 - งานที่ต้องบันทึกแม้ request ล้ม (นับ login ผิด, audit `login_failed`) = service แยก `REQUIRES_NEW` (`LoginThrottle`) — เรียกนอก platformTx (ดูกติกา B5 ข้างบน)
-- signup ต่อ IP 10 / forgot-password ต่อ IP 10 + ต่อบริษัท+อีเมล 3 ครั้งใน 15 นาที (นับทุกครั้ง atomic — `LoginThrottle.count`) → 429
+- forgot-password ต่อ IP 10 + ต่อบริษัท+อีเมล 3 ครั้งใน 15 นาที (นับทุกครั้ง atomic — `LoginThrottle.count`) → 429
 - จำกัด login ผิด: บัญชี 5 / IP 30 ครั้งใน 15 นาที → ล็อก 15 นาที, 429 — endpoint ตรวจรหัสใหม่ใช้ `LoginThrottle.attempt()` (จองสิทธิ์ก่อนตรวจรหัส — atomic, B6)
   → ผิด `failed()` (สิทธิ์ที่จองนับเป็นความผิด) / ไม่ผิด `passed()` (คืนสิทธิ์; login สำเร็จล้างตัวนับบัญชี) ใน `finally` — ห้าม check แล้วค่อยนับ;
   สิทธิ์ที่จองระหว่างตรวจรหัสนับรวมด้วย (บัญชีเดียว login พร้อมกัน > 5 ได้ 429 ชั่วคราว) — test `ThrottleConcurrencyIT`
-- รหัสผ่าน BCrypt (`PasswordEncoder` bean); ไม่มีผู้ใช้ก็ยังตรวจกับ hash หลอก (เวลาตอบไม่บอกว่ามีชื่อนี้)
+- รหัสผ่าน BCrypt (`PasswordEncoder` bean); ไม่มีผู้ใช้ / ยังไม่ตั้งรหัส (`password_hash` null — owner ของบริษัทใหม่ E59) ก็ยังตรวจกับ hash หลอก (เวลาตอบไม่บอกว่ามีชื่อนี้)
 
 ## Endpoint ของร้าน — รูปแบบ (ขั้น 3 เป็นต้นไป)
 

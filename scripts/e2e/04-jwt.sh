@@ -56,7 +56,7 @@ as -
 
 case_id 4.4 "tenantId = B, sub = ผู้ใช้ของ A"
 B_CODE="E4B$(openssl rand -hex 2 | tr a-f A-F)"
-call POST /auth/signup "$(jq -nc --arg c "$B_CODE" '{companyCode:$c, companyName:"บริษัท B", taxId:"", vatRegistered:false,
+signup_company "$(jq -nc --arg c "$B_CODE" '{companyCode:$c, companyName:"บริษัท B", taxId:"", vatRegistered:false,
   branch:{code:"HQ", name:"สำนักงานใหญ่", branchNo:"00000", address:"กรุงเทพฯ", phone:""},
   owner:{name:"เจ้าของ B", username:"owner", email:("owner@" + ($c|ascii_downcase) + ".e2e.test"), password:"owner1234"}, planId:"pro"}')"
 expect_status 200

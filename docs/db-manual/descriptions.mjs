@@ -124,7 +124,7 @@ export const logicalRefs = [
 // ชื่อ package ของ api (หัวคอลัมน์ CRUD matrix) — ลำดับ = ลำดับคอลัมน์
 // ---------------------------------------------------------------------------------------------
 export const packages = {
-  auth: 'login / signup / ลืมรหัสผ่าน',
+  auth: 'login / ลืมรหัสผ่าน / ลิงก์ตั้งรหัสผ่าน',
   platform: 'ผู้ดูแลแพลตฟอร์ม',
   billing: 'ค่าบริการ SaaS (job รายวัน)',
   company: 'ตั้งค่าบริษัท / แพ็กเกจ / ส่งออก / ขอลบ',
@@ -178,7 +178,7 @@ export const tables = {
     purpose:
       'ทะเบียนบริษัทที่ใช้ระบบ 1 แถว = 1 ลูกค้าของ SaaS — `id` คือ tenant ที่ทุกตารางของร้านอ้างผ่าน `tenant_id`; เก็บสถานะการใช้งาน แพ็กเกจ รอบเก็บเงิน และคำขอลบ (ชื่อ / เลขภาษีของบริษัทอยู่ที่ `dt_company_info`)',
     lifecycle: [
-      'สร้างตอนสมัครใช้งาน (`POST /auth/signup`) พร้อม owner, ข้อมูลบริษัท, สาขาแรก, ช่องทางเงินสด',
+      'สร้างโดยผู้ดูแลแพลตฟอร์มเท่านั้น (`POST /platform/companies`, E59 — ไม่มีสมัครเองแล้ว) พร้อม owner, ข้อมูลบริษัท, สาขาแรก, ช่องทางเงินสด',
       'แก้: เปลี่ยนแพ็กเกจ, job ค่าบริการ (เลื่อน `next_invoice_on`, ระงับเมื่อค้างชำระ), ผู้ดูแลแพลตฟอร์มระงับ / เปิดใช้, ขอลบ / ยกเลิกคำขอ',
       '**ไม่ลบ**: purge ลบข้อมูลทุกตารางของบริษัท แต่เหลือแถวนี้ไว้ (`deleted_at` + ชื่อตอนลบ) เพื่อให้รหัสบริษัทไม่ถูกใช้ซ้ำ',
     ],
@@ -267,11 +267,11 @@ export const tables = {
     columns: { prefix: 'ส่วนหน้าของเลข เช่น `SUB-202611-`', last_no: 'เลขล่าสุดที่ออกไปแล้วของ prefix นี้' },
   },
   dt_password_reset_tokens: {
-    title: 'ลิงก์ตั้งรหัสผ่านใหม่ของ owner',
-    purpose: 'token ของลิงก์ "ลืมรหัสผ่าน" ที่ส่งทางอีเมลให้ owner — ใช้ครั้งเดียว หมดอายุใน 1 ชั่วโมง (E41); พนักงานไม่ใช้ช่องทางนี้ (admin ตั้งรหัสให้)',
+    title: 'ลิงก์ตั้งรหัสผ่านของ owner',
+    purpose: 'token ของลิงก์ตั้งรหัสผ่านของ owner — ใช้ครั้งเดียว: "ลืมรหัสผ่าน" ส่งทางอีเมล หมดอายุใน 1 ชั่วโมง (E41) หรือลิงก์ตั้งรหัสครั้งแรกที่ผู้ดูแลแพลตฟอร์มคัดลอกส่งให้ หมดอายุใน 72 ชั่วโมง (E59); พนักงานไม่ใช้ช่องทางนี้ (admin ตั้งรหัสให้)',
     lifecycle: [
-      'สร้างตอน `POST /auth/forgot-password` ที่อีเมลตรงกับ owner ที่ใช้งานอยู่',
-      'แก้: ตั้งรหัสสำเร็จ → `used_at`',
+      'สร้างตอน `POST /auth/forgot-password` ที่อีเมลตรงกับ owner ที่ใช้งานอยู่ (`reset`) หรือตอน platform สร้างบริษัท / ออกลิงก์ใหม่ (`setup`)',
+      'แก้: ตั้งรหัสสำเร็จ → `used_at`; platform ออกลิงก์ใหม่ → ลิงก์ที่ยังไม่ใช้ของ owner คนนั้นได้ `used_at` (ใช้ไม่ได้)',
       'ลบ: job รายวันลบ token ที่หมดอายุเกิน 1 วัน, purge บริษัท',
     ],
     rules: ['เก็บเฉพาะ hash ของ token — ตัว token จริงอยู่ในลิงก์ของอีเมลเท่านั้น', 'ไม่อยู่ใต้ RLS (ใช้ก่อน login) — an22_platform เท่านั้น'],
@@ -280,13 +280,14 @@ export const tables = {
       company_id: 'บริษัทของผู้ใช้ (FK รวมกับ user_id → `dt_users (tenant_id, id)`)',
       user_id: 'owner ที่ขอ (FK รวม company_id + user_id)',
       token_hash: 'hash ของ token ในลิงก์ — ไม่ซ้ำ',
-      expires_at: 'หมดอายุ (ออก + 1 ชั่วโมง)',
-      used_at: 'เวลาที่ใช้ตั้งรหัสแล้ว (null = ยังไม่ใช้) — ใช้แล้วใช้ซ้ำไม่ได้',
+      expires_at: 'หมดอายุ (`reset` ออก + 1 ชั่วโมง, `setup` ออก + 72 ชั่วโมง)',
+      used_at: 'เวลาที่ใช้ตั้งรหัสแล้ว หรือถูกแทนด้วยลิงก์ใหม่ (null = ยังไม่ใช้) — ใช้แล้วใช้ซ้ำไม่ได้',
+      kind: 'ชนิดลิงก์: `reset` ลืมรหัสผ่าน (E41, audit `password_reset`) · `setup` ตั้งรหัสครั้งแรกจาก platform (E59, audit `password_set`)',
     },
   },
   dt_login_throttle: {
     title: 'ตัวนับ login ผิด',
-    purpose: 'จำกัดการเดารหัสผ่าน: นับ login ผิดต่อบัญชี (บริษัท + username ที่พิมพ์) และต่อ IP ภายในช่วงเวลา — เกินเพดาน (บัญชี 5 / IP 30 ครั้งใน 15 นาที) ล็อก 15 นาที ตอบ 429; ใช้นับ signup / ลืมรหัสผ่านต่อ IP ด้วย',
+    purpose: 'จำกัดการเดารหัสผ่าน: นับ login ผิดต่อบัญชี (บริษัท + username ที่พิมพ์) และต่อ IP ภายในช่วงเวลา — เกินเพดาน (บัญชี 5 / IP 30 ครั้งใน 15 นาที) ล็อก 15 นาที ตอบ 429; ใช้นับลืมรหัสผ่านต่อ IP / ต่อบัญชีด้วย',
     lifecycle: [
       'สร้าง / แก้: ทุกครั้งที่ตรวจรหัส (จองสิทธิ์ก่อนตรวจ แล้วนับผิดหรือคืนสิทธิ์ — atomic)',
       'ลบ: login สำเร็จลบแถวของบัญชี; job รายวันลบแถวที่หมดช่วงเกิน 1 วัน',
@@ -369,7 +370,7 @@ export const tables = {
       role: 'บทบาท: `owner` เจ้าของ (สิทธิ์ admin ทั้งหมด + บัญชีบริษัท) · `admin` ผู้ดูแล · `user` พนักงาน (แคชเชียร์ / คลัง)',
       active: 'ใช้งานอยู่ (false = login ไม่ได้, token เดิมได้ 401)',
       all_branches: 'เข้าได้ทุกสาขา (true แล้ว `dt_user_branches` ว่าง) — admin + ทุกสาขา = company admin',
-      password_hash: 'hash ของรหัสผ่าน (BCrypt) — ไม่เคยส่งออก API',
+      password_hash: 'hash ของรหัสผ่าน (BCrypt) — ไม่เคยส่งออก API; null = ยังไม่ตั้ง (owner ของบริษัทที่ platform สร้าง จนกว่าจะใช้ลิงก์ — login ไม่ผ่าน, E59)',
       created_at: 'วันที่สร้างบัญชี (= `User.createdAt`) + เป็น stamp ด้วย',
     },
   },
@@ -1173,20 +1174,25 @@ export const tables = {
 // ---------------------------------------------------------------------------------------------
 export const flows = [
   {
-    id: 'signup',
-    title: 'สมัครใช้งาน (บริษัทใหม่)',
-    intro: '`POST /auth/signup` — ทำด้วย role an22_platform เพราะยังไม่มี tenant; ทั้งหมดใน transaction เดียว',
+    id: 'new-company',
+    title: 'สร้างบริษัทใหม่ (ผู้ดูแลแพลตฟอร์ม)',
+    intro: '`POST /platform/companies` (E59 — ไม่มีสมัครเองแล้ว) — token ของ platform, role an22_platform; ทั้งหมดใน transaction เดียว',
     steps: [
-      { table: 'dt_login_throttle', op: 'U', text: 'นับการสมัครต่อ IP (เกิน 10 ครั้งใน 15 นาที → 429) — transaction แยกก่อนเริ่ม' },
       { table: 'dt_companies', op: 'R', text: 'รหัสบริษัทต้องไม่เคยถูกใช้ (รวมบริษัทที่ลบแล้ว)' },
-      { table: 'dt_companies', op: 'I', text: 'บริษัทใหม่ แพ็กเกจที่เลือก ช่วงทดลองใช้ + วันออกใบแจ้งหนี้แรก' },
-      { table: 'dt_users', op: 'I', text: 'owner (อีเมลบังคับ, ทุกสาขา)' },
+      { table: 'dt_companies', op: 'I', text: 'บริษัทใหม่ แพ็กเกจที่เลือก ช่วงทดลองใช้ (0 วัน = ไม่มี) + วันออกใบแจ้งหนี้แรก' },
+      { table: 'dt_users', op: 'I', text: 'owner (อีเมลบังคับ, ทุกสาขา) **ยังไม่มีรหัสผ่าน**' },
       { table: 'dt_company_info', op: 'I', text: 'ชื่อ เลขภาษี สถานะ VAT + ค่าเริ่มต้นของกติกา' },
       { table: 'dt_branches', op: 'I', text: 'สาขาแรก (สำนักงานใหญ่ 00000)' },
       { table: 'dt_payment_methods', op: 'I', text: 'ช่องทางเงินสด 1 ช่องทาง (ต้องมีเสมอ)' },
-      { table: 'dt_audit_log', op: 'I', text: '`signup`' },
+      { table: 'dt_audit_log', op: 'I', text: '`company_create` (ผู้ทำ = platform)' },
+      { table: 'dt_password_reset_tokens', op: 'I', text: 'ลิงก์ `setup` ของ owner (72 ชม.) — token ดิบอยู่ในคำตอบครั้งเดียว ผู้ดูแลคัดลอกส่งให้เจ้าของ' },
+      { table: 'dt_billing_invoices', op: 'I', text: 'ไม่มีช่วงทดลอง → ใบแจ้งหนี้งวดแรกทันที' },
     ],
-    notes: ['เมนูของพนักงานไม่มีแถวใน `dt_menu_access` = ค่าเริ่มต้น; เครื่อง POS / หมวด / สินค้าเริ่มว่าง'],
+    notes: [
+      'owner ตั้งรหัสด้วย `POST /auth/reset-password` (`password_set`) แล้วผูก Authenticator ตอน login ครั้งแรก',
+      'ออกลิงก์ใหม่ `POST /platform/companies/:id/owner-setup-link` (`owner_setup_link`) — ลิงก์ค้างเดิมใช้ไม่ได้',
+      'เมนูของพนักงานไม่มีแถวใน `dt_menu_access` = ค่าเริ่มต้น; เครื่อง POS / หมวด / สินค้าเริ่มว่าง',
+    ],
   },
   {
     id: 'login',

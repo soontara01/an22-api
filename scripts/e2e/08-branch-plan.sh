@@ -79,7 +79,7 @@ as -
 
 # ---------- starter ----------
 S_CODE="E8S$(openssl rand -hex 2 | tr a-f A-F)"
-call POST /auth/signup "$(jq -nc --arg c "$S_CODE" '{companyCode:$c, companyName:"บริษัท starter", taxId:"", vatRegistered:false,
+signup_company "$(jq -nc --arg c "$S_CODE" '{companyCode:$c, companyName:"บริษัท starter", taxId:"", vatRegistered:false,
   branch:{code:"HQ", name:"สำนักงานใหญ่", branchNo:"00000", address:"กรุงเทพฯ", phone:""},
   owner:{name:"เจ้าของ starter", username:"owner", email:("owner@" + ($c | ascii_downcase) + ".e2e.test"), password:"owner1234"}, planId:"starter"}')"
 [[ "$STATUS" == 200 ]] || { fail "signup starter → $STATUS $BODY"; finish; exit 1; }
