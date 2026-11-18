@@ -2,10 +2,8 @@ package com.an22.api.auth;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import com.an22.api.config.ClockConfig;
 import com.an22.api.rules.SignupRules;
 import com.an22.api.support.ApiTest;
 import com.an22.api.support.TenantSql;
@@ -13,8 +11,6 @@ import com.an22.api.support.TestCompanies;
 import com.an22.api.support.TestCompanies.Company;
 import com.an22.api.support.TestMailer;
 import java.nio.charset.StandardCharsets;
-import java.time.LocalDate;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -23,7 +19,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.ResultActions;
 
-/** สมัครใช้งาน (E37) + ลืมรหัสผ่าน / ตั้งรหัสด้วยลิงก์ (E41) — public endpoint, ข้อความตาม mock. */
+/** ลืมรหัสผ่าน / ตั้งรหัสด้วยลิงก์ (E41) + ไม่มีสมัครเองแล้ว (E59) — public endpoint, ข้อความตาม mock. */
 class AccountIT extends ApiTest {
 
   @Autowired TestCompanies companies;
@@ -39,87 +35,6 @@ class AccountIT extends ApiTest {
 
   private ResultActions call(String path, Object body, String fromIp) throws Exception {
     return mvc.perform(post(path).header("X-Real-IP", fromIp).contentType(MediaType.APPLICATION_JSON).content(JSON.writeValueAsString(body)));
-  }
-
-  private static Map<String, Object> signup(String code) {
-    Map<String, Object> p = new HashMap<>();
-    p.put("companyCode", " " + code.toLowerCase() + " ");
-    p.put("companyName", " บริษัท แอคมี จำกัด ");
-    p.put("taxId", "0105550123451");
-    p.put("vatRegistered", true);
-    p.put("branch", Map.of("code", "hq", "name", "สำนักงานใหญ่", "branchNo", "00000", "address", "กรุงเทพฯ", "phone", ""));
-    p.put("owner", Map.of("name", "สมศักดิ์", "username", "Boss", "email", "boss@acme.test", "password", "secret"));
-    p.put("planId", "starter");
-    return p;
-  }
-
-  private static String newCode() {
-    return "S" + UUID.randomUUID().toString().replace("-", "").substring(0, 12).toUpperCase();
-  }
-
-  @Test
-  void signupCreatesATrialCompanyAndLogsTheOwnerIn() throws Exception {
-    String code = newCode();
-    String trialEnd = LocalDate.now(ClockConfig.BANGKOK).plusDays(14).toString();
-    // สมัครแล้วต้องผูก Microsoft Authenticator ก่อนเข้าระบบ (E57)
-    String step1 = call("/auth/signup", signup(code)).andExpect(status().isOk())
-        .andExpect(jsonPath("$.token").doesNotExist())
-        .andExpect(jsonPath("$.mfa").value("setup"))
-        .andReturn().getResponse().getContentAsString();
-    var challenge = JSON.readTree(step1);
-    String body = mvc.perform(post("/auth/mfa/verify").header("Authorization", bearer(challenge.path("challenge").asString()))
-            .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
-            .content(JSON.writeValueAsString(java.util.Map.of("code", com.an22.api.rules.TotpRules.code(
-                challenge.path("setup").path("secret").asString(), com.an22.api.rules.TotpRules.step(System.currentTimeMillis()))))))
-        .andExpect(status().isOk())
-        .andExpect(jsonPath("$.token").isString())
-        .andExpect(jsonPath("$.user.username").value("boss")).andExpect(jsonPath("$.user.role").value("owner"))
-        .andExpect(jsonPath("$.user.allBranches").value(true))
-        .andExpect(jsonPath("$.company.code").value(code)).andExpect(jsonPath("$.company.name").value("บริษัท แอคมี จำกัด"))
-        .andExpect(jsonPath("$.branches[0].code").value("HQ"))
-        .andExpect(jsonPath("$.branches[0].receiptFooter").value("ขอบคุณที่ใช้บริการ"))
-        .andExpect(jsonPath("$.billing").value(org.hamcrest.Matchers.nullValue()))
-        .andReturn().getResponse().getContentAsString();
-    String token = JSON.readTree(body).path("token").asString();
-
-    mvc.perform(as(token, get("/company/subscription"))).andExpect(jsonPath("$.planId").value("starter"))
-        .andExpect(jsonPath("$.status").value("trial")).andExpect(jsonPath("$.subscription.trialEndsOn").value(trialEnd))
-        .andExpect(jsonPath("$.subscription.nextInvoiceOn").value(LocalDate.parse(trialEnd).plusDays(1).toString()));
-    mvc.perform(as(token, get("/payment-methods"))).andExpect(jsonPath("$.length()").value(1))
-        .andExpect(jsonPath("$[0].code").value("CASH")).andExpect(jsonPath("$[0].cashRounding").value("0.25"));
-    mvc.perform(as(token, get("/settings/company"))).andExpect(jsonPath("$.taxId").value("0105550123451"))
-        .andExpect(jsonPath("$.exchangeDays").value(7));
-    mvc.perform(as(token, get("/company/onboarding")))
-        .andExpect(content().json("{\"terminals\":0,\"categories\":0,\"products\":0,\"prices\":0,\"users\":1}", true));
-    assertThat(login(code, "boss", "secret")).isNotEmpty();
-    long id = sql.platform(jdbc -> jdbc.sql("SELECT id FROM dt_companies WHERE code = :c").param("c", code).query(Long.class).single());
-    List<String> signups = sql.platform(jdbc -> jdbc.sql("SELECT action || '|' || ref_label || '|' || detail || '|' || user_name"
-            + " FROM dt_audit_log WHERE tenant_id = :t AND action = 'signup'").param("t", id).query(String.class).list());
-    assertThat(signups).containsExactly("signup|" + code + "|สมัครใช้งาน แพ็กเกจ Starter ทดลองใช้ถึง " + trialEnd + "|สมศักดิ์");
-
-    // รหัสเดิม (ตัวพิมพ์ต่าง) ใช้ไม่ได้อีก — รวมบริษัทที่ถูกลบแล้ว
-    call("/auth/signup", signup(code)).andExpect(status().isBadRequest())
-        .andExpect(content().json(message("รหัสบริษัทนี้ถูกใช้แล้ว"), true));
-    sql.platform(jdbc -> jdbc.sql("UPDATE dt_companies SET deleted_at = now() WHERE id = :id").param("id", id).update());
-    call("/auth/signup", signup(code)).andExpect(content().json(message("รหัสบริษัทนี้ถูกใช้แล้ว"), true));
-  }
-
-  @Test
-  void signupChecksTheFormInOrder() throws Exception {
-    Map<String, Object> p = signup(newCode());
-    p.put("companyName", " ");
-    call("/auth/signup", p).andExpect(status().isBadRequest()).andExpect(content().json(message("กรุณากรอกชื่อบริษัท"), true));
-    p = signup("ab");
-    call("/auth/signup", p).andExpect(content().json(message("รหัสบริษัทใช้ได้เฉพาะ A-Z, 0-9 ยาว 3–20 ตัว"), true));
-    p = signup(newCode());
-    p.put("owner", Map.of("name", "ส", "username", "boss", "email", "", "password", "secret"));
-    call("/auth/signup", p).andExpect(content().json(message("เจ้าของบริษัทต้องมีอีเมล (ใช้กู้รหัสผ่านและแจ้งเรื่องการเก็บเงิน)"), true));
-    p = signup(newCode());
-    p.put("planId", "gold");
-    call("/auth/signup", p).andExpect(content().json(message("กรุณาเลือกแพ็กเกจ"), true));
-    p = signup(newCode());
-    p.remove("branch");
-    call("/auth/signup", p).andExpect(status().isBadRequest());
   }
 
   @Test
@@ -185,19 +100,21 @@ class AccountIT extends ApiTest {
   }
 
   @Test
-  void signupAndForgotPasswordAreRateLimited() throws Exception {
-    String tooMany = message(LoginThrottle.TOO_MANY);
-    String signupIp = "203.0.113." + (1 + Math.abs(UUID.randomUUID().hashCode() % 250));
-    Map<String, Object> bad = signup("ab");
-    for (int i = 0; i < AccountService.SIGNUP_IP_MAX; i++) {
-      call("/auth/signup", bad, signupIp).andExpect(status().isBadRequest());
-    }
-    // นับทุกครั้ง (รวมที่ตอบ 400) — ครั้งถัดไปของ IP นี้ 429 แม้ข้อมูลถูก; IP อื่นยังสมัครได้
-    call("/auth/signup", signup(newCode()), signupIp).andExpect(status().isTooManyRequests()).andExpect(content().json(tooMany, true));
-    call("/auth/signup", signup(newCode())).andExpect(status().isOk());
+  void signupIsGone() throws Exception {
+    // E59: บริษัทใหม่สร้างได้ทางเดียวคือ platform — /auth/signup ไม่ใช่ public path แล้ว (ไม่มี token → 401) และไม่สร้างอะไร
+    long before = sql.platform(jdbc -> jdbc.sql("SELECT count(*) FROM dt_companies").query(Long.class).single());
+    call("/auth/signup", Map.of("companyCode", "S" + UUID.randomUUID().toString().substring(0, 8).toUpperCase(), "companyName", "x"))
+        .andExpect(status().isUnauthorized());
+    long after = sql.platform(jdbc -> jdbc.sql("SELECT count(*) FROM dt_companies").query(Long.class).single());
+    assertThat(after).isEqualTo(before);
+  }
 
+  @Test
+  void forgotPasswordIsRateLimited() throws Exception {
+    String tooMany = message(LoginThrottle.TOO_MANY);
     // ต่อรหัสบริษัท + อีเมล: นับแม้ไม่มีจริง (429 ไม่บอกว่ามีหรือไม่)
-    Map<String, String> unknown = Map.of("companyCode", "NOPE" + newCode(), "email", "who@x.test");
+    Map<String, String> unknown = Map.of("companyCode", "NOPE" + UUID.randomUUID().toString().substring(0, 8).toUpperCase(),
+        "email", "who@x.test");
     for (int i = 0; i < AccountService.FORGOT_ACCOUNT_MAX; i++) {
       call("/auth/forgot-password", unknown).andExpect(status().isOk());
     }

@@ -88,6 +88,14 @@ public class PlatformCompanyDao {
         .optional();
   }
 
+  /** E59: owner ที่ใช้งานอยู่ (ผู้รับลิงก์ตั้งรหัสผ่าน). */
+  public Optional<PlatformCompany.Owner> activeOwner(long companyId) {
+    return jdbc.sql("SELECT id, name, username, email FROM dt_users WHERE tenant_id = :t AND role = 'owner' AND active")
+        .param("t", companyId)
+        .query((rs, i) -> new PlatformCompany.Owner(rs.getLong("id"), rs.getString("name"), rs.getString("username"), rs.getString("email")))
+        .optional();
+  }
+
   /** E58: ผู้ใช้ของบริษัทตามชื่อผู้ใช้ (ตัวเล็กแล้ว) — id + username. */
   public Optional<PlatformCompany.Owner> userByUsername(long companyId, String username) {
     return jdbc.sql("SELECT id, name, username, email FROM dt_users WHERE tenant_id = :t AND username = :u")
@@ -97,9 +105,10 @@ public class PlatformCompanyDao {
         .optional();
   }
 
-  public void setOwnerPassword(long companyId, long userId, String hash) {
-    jdbc.sql("UPDATE dt_users SET password_hash = :h WHERE tenant_id = :t AND id = :id")
-        .param("h", hash).param("t", companyId).param("id", userId).update();
+  /** E59: owner ตั้งรหัสผ่านแล้ว (null = ยังไม่ได้ใช้ลิงก์ตั้งรหัสผ่าน). */
+  public boolean ownerPasswordSet(long companyId) {
+    return jdbc.sql("SELECT EXISTS (SELECT 1 FROM dt_users WHERE tenant_id = :t AND role = 'owner' AND password_hash IS NOT NULL)")
+        .param("t", companyId).query(Boolean.class).single();
   }
 
   public void setPlan(long companyId, String planId) {

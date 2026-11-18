@@ -94,7 +94,7 @@ expect_status 200
 case_id 30.5 "ยกเลิกขณะมีใบค้างเกินผ่อนผัน"
 B_CODE="E30B$(openssl rand -hex 2 | tr a-f A-F)"
 as -
-call POST /auth/signup "$(jq -nc --arg c "$B_CODE" '{companyCode:$c, companyName:"บริษัทค้างชำระ", taxId:"", vatRegistered:false,
+signup_company "$(jq -nc --arg c "$B_CODE" '{companyCode:$c, companyName:"บริษัทค้างชำระ", taxId:"", vatRegistered:false,
   branch:{code:"HQ", name:"สำนักงานใหญ่", branchNo:"00000", address:"กรุงเทพฯ", phone:""},
   owner:{name:"เจ้าของ B", username:"owner", email:("owner@" + ($c | ascii_downcase) + ".e2e.test"), password:"owner1234"}, planId:"pro"}')"
 T_B=$(jq -r .token <<<"$BODY")

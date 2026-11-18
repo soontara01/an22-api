@@ -5,9 +5,7 @@ import com.an22.api.auth.AuthService.MfaVerifyRequest;
 import com.an22.api.auth.AuthService.VerifyRequest;
 import com.an22.api.model.LoginResponse;
 import com.an22.api.model.LoginResult;
-import com.an22.api.model.MfaChallenge;
 import com.an22.api.model.Session;
-import com.an22.api.model.SignupPayload;
 import com.an22.api.model.User;
 import com.an22.api.web.ClientIp;
 import jakarta.servlet.http.HttpServletRequest;
@@ -50,19 +48,13 @@ public class AuthController {
     return auth.verifyMfa(challenge, body, ClientIp.of(request));
   }
 
-  /** สมัครใช้งาน (public) — สำเร็จ = login เป็น owner ทันที; ถี่เกิน → 429. */
-  @PostMapping("/auth/signup")
-  MfaChallenge signup(@RequestBody SignupPayload body, HttpServletRequest request) {
-    return accounts.signup(body, ClientIp.of(request));
-  }
-
   /** ลืมรหัสผ่าน owner (public) — ตอบข้อความเดียวเสมอ; ถี่เกิน → 429. */
   @PostMapping("/auth/forgot-password")
   AccountService.Message forgotPassword(@RequestBody AccountService.ForgotPasswordRequest body, HttpServletRequest request) {
     return accounts.forgotPassword(body, ClientIp.of(request));
   }
 
-  /** ตั้งรหัสผ่านด้วยลิงก์ทางอีเมล (public) — ตอบ body ว่าง. */
+  /** ตั้งรหัสผ่านด้วยลิงก์ (ลืมรหัส E41 / จาก platform E59, public) — ตอบ body ว่าง. ไม่มี {@code /auth/signup} แล้ว (E59 → 404). */
   @PostMapping("/auth/reset-password")
   void resetPassword(@RequestBody AccountService.ResetPasswordRequest body) {
     accounts.resetPassword(body);

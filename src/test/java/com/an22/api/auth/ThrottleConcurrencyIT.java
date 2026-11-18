@@ -99,13 +99,11 @@ class ThrottleConcurrencyIT extends ApiTest {
   }
 
   @Test
-  void concurrentForgotPasswordAndSignupDoNotExhaustThePlatformPool() throws Exception {
+  void concurrentForgotPasswordsDoNotExhaustThePlatformPool() throws Exception {
     Company c = companies.create();
     List<Integer> forgot = concurrently(i ->
         json(post("/auth/forgot-password"), "198.18.37." + i, Map.of("companyCode", c.code(), "email", "x" + i + "@example.test")));
     assertThat(forgot).containsOnly(200);
-    List<Integer> signup = concurrently(i -> json(post("/auth/signup"), "198.18.38." + i, Map.of("companyCode", "", "companyName", "")));
-    assertThat(signup).containsOnly(400);
   }
 
   // ---------- B6: burst ไม่เกินเพดาน ----------
@@ -131,13 +129,6 @@ class ThrottleConcurrencyIT extends ApiTest {
         json(as(token, post("/auth/verify")), "198.18.40." + i, Map.of("username", "boss", "password", "wrong" + i)));
     assertThat(count(statuses, 400)).isEqualTo(LoginThrottle.ACCOUNT_MAX);
     assertThat(count(statuses, 429)).isEqualTo(10 - LoginThrottle.ACCOUNT_MAX);
-  }
-
-  @Test
-  void burstOfSignupsFromOneIpStopsAtTheLimit() throws Exception {
-    List<Integer> statuses = concurrently(15, i -> json(post("/auth/signup"), "198.18.41.1", Map.of("companyCode", "", "companyName", "")));
-    assertThat(count(statuses, 400)).isEqualTo(AccountService.SIGNUP_IP_MAX);
-    assertThat(count(statuses, 429)).isEqualTo(15 - AccountService.SIGNUP_IP_MAX);
   }
 
   @Test

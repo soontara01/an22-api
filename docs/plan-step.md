@@ -508,7 +508,7 @@ CSRF กันที่ web ด้วย `XSRF-TOKEN` / `X-XSRF-TOKEN` (ขั�
 - `GET /audit-log` (`AuditRules.filterAuditEvents`, `parseAuditQuery`), `GET /company/onboarding`, `GET /company/subscription`, `PUT /company/plan`
 - billing: job รายวัน + `catchUp()` ตอน login / `me` (หัวข้อ "Stateless / scale") ออกใบแจ้งหนี้ `SUB-YYYYMM-NNNN` + ระงับเมื่อพ้นผ่อนผัน; `actorKind: 'system'`
   — test: job 2 ตัวพร้อมกันออกใบเดียว, login ก่อน job ได้ใบแล้ว job ไม่ออกซ้ำ
-- `POST /auth/signup` (ใช้ role platform สร้างบริษัท; audit `signup`), `POST /auth/forgot-password` (ตอบข้อความเดียวเสมอ, token เก็บ hash, ลิงก์จาก `APP_BASE_URL` ไม่ใช่ `Host`), `POST /auth/reset-password` (audit `password_reset`)
+- ~~`POST /auth/signup`~~ (ตัดแล้ว — ขั้น 18 / E59) (ใช้ role platform สร้างบริษัท; audit `signup`), `POST /auth/forgot-password` (ตอบข้อความเดียวเสมอ, token เก็บ hash, ลิงก์จาก `APP_BASE_URL` ไม่ใช่ `Host`), `POST /auth/reset-password` (audit `password_reset`)
 - `GET /company/export` (ไม่มีรหัสผ่าน / token; ข้อมูลผู้ซื้อถอดรหัสแล้ว), `GET|POST|DELETE /company/deletion`; ระหว่างรอลบ: เฉพาะ owner, endpoint อื่น → 403
 - test: billing ตาม `subscription.model.spec.ts` ด้วย `Clock` ปลอม, ลิงก์ไม่ใช้ header `Host`
 - ผลที่ทำ (รายละเอียดที่แผนไม่ได้ระบุ):
@@ -615,6 +615,23 @@ CSRF กันที่ web ด้วย `XSRF-TOKEN` / `X-XSRF-TOKEN` (ขั�
   `actorKind: platform` "ผู้ให้บริการล้าง Microsoft Authenticator ให้" — owner ทำมือถือหายและไม่มีผู้ดูแลระดับบริษัทคนอื่น
 - `RequestLogFilter`: ไม่ log body ของ `/me/mfa/**` (รหัส 6 หลัก + change)
 - ไม่มี migration · test: `MfaLoginIT` (เปลี่ยนเครื่อง), `PlatformCompanyIT` (ล้างให้)
+
+### ขั้น 18 — บริษัทใหม่สร้างได้ทางเดียวคือ platform (E59, 2026-11-18)
+- เหตุผล: กัน bot กดสมัครทดลองใช้รัว ๆ (ข้อมูลบวม + รหัสบริษัทถูกเผาถาวร E39) — ตัด `POST /auth/signup` (ออกจาก `PUBLIC_PATHS` / controller;
+  ไม่มี token → 401, มี token → 404) และตัวนับ signup ต่อ IP
+- `V13__platform_create_company.sql`: `dt_users.password_hash` null ได้ (= ยังไม่ตั้ง, login ไม่ผ่าน — `ShopLoginTx.check` ตรวจกับ hash หลอกแทน),
+  `dt_password_reset_tokens.kind` (`reset` / `setup`, ค่าเริ่ม reset), audit action `company_create` / `owner_setup_link` / `password_set`
+- `POST /platform/companies` (`PlatformCompanyService.create` + `NewCompanyDao`, platformTx): `SignupRules.newCompanyError()` (owner ไม่มีรหัสผ่าน,
+  `trialDays` 0–90 ไม่ส่ง = 14, ทศนิยม → ข้อความของกฎผ่าน `IntegerOrInvalid`) → บริษัท / owner (`password_hash` null) / company_info / สาขาแรก /
+  `CASH` (stamp platform) → audit `company_create` → ลิงก์ setup (`PasswordResetTokens.issueSetup`, 72 ชม., เก็บ HMAC) → `trialDays = 0`
+  ออกใบแจ้งหนี้งวดแรกทันที (`BillingService.catchUpIn`) → `{ company: Detail, setupLink: { path, expiresAt } }`
+- `POST /platform/companies/{id}/owner-setup-link` → `SetupLink` แทน `PUT …/owner-password` (ลบแล้ว — platform ไม่รู้รหัสผ่านลูกค้า): ลิงก์ค้างของ owner
+  ทุกตัวได้ `used_at`, audit `owner_setup_link`; `Detail.ownerPasswordSet`
+- `POST /auth/reset-password` รับทั้งสองชนิด: `setup` → audit `password_set` "ตั้งรหัสผ่านด้วยลิงก์จากผู้ให้บริการ"
+- test: `PlatformCompanyIT` (สร้าง / ลำดับกฎ / ไม่มี trial / ลิงก์ใหม่แทนลิงก์เก่า), `AccountIT.signupIsGone`, `SignupAndAuditRulesTest`;
+  e2e: `lib.sh signup_company` (platform สร้าง → ลิงก์ → ตั้งรหัส → login) แทน `/auth/signup` ทุกข้อ, ข้อ 5.1–5.5 / 32.5 เขียนใหม่
+  — `scripts/multi-instance-check.sh` แก้ด้วย (ค้างตั้งแต่ E57): login ร้าน / platform ผ่านขั้น Authenticator (ล้าง secret ด้วย SQL → TOTP),
+    บริษัททดสอบสร้างผ่าน platform + ลิงก์ setup — รันผ่านทั้งหมด 2026-11-18
 
 ## เรื่องที่ต้องถามผู้ใช้ระหว่างทาง (ไม่เดา)
 

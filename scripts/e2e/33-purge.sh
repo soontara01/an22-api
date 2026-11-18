@@ -55,7 +55,7 @@ read -r a_rows a_tables <<<"$(tenant_rows "$A")"
 echo "     ข้อมูล A ก่อน purge: $a_rows แถว · $a_tables"
 check "เตรียม: ทุกชนิดมีแถว" "ok" "$(for t in dt_sales dt_tax_invoices dt_shifts dt_transfers dt_credit_notes dt_exchanges dt_held_bills dt_suppliers dt_promotions dt_audit_log dt_menu_access dt_stock_movements; do
   [[ " $a_tables " == *" $t="* ]] || echo -n "$t "; done; echo -n ok)"
-expect_sql "SELECT (SELECT count(*) FROM dt_password_reset_tokens WHERE company_id = $A) || ':' || (SELECT count(*) FROM dt_billing_invoices WHERE company_id = $A)" "1:1"
+expect_sql "SELECT (SELECT count(*) FROM dt_password_reset_tokens WHERE company_id = $A) || ':' || (SELECT count(*) FROM dt_billing_invoices WHERE company_id = $A)" "2:1"   # ลิงก์ setup ตอนสร้างบริษัท (E59) + ลิงก์ reset ที่ใส่เอง
 as -; platform_login; T_P=$(jq -r .token <<<"$BODY")
 B_BEFORE=$(snapshot "$B")
 
@@ -95,14 +95,14 @@ for t in "$T_OWNER" "$T_BOSS"; do
   expect_status 401
 done
 as -
-call POST /auth/signup "$(jq -nc --arg c "${A_CODE,,}" '{companyCode:$c, companyName:"ใหม่", taxId:"", vatRegistered:false,
+signup_company "$(jq -nc --arg c "${A_CODE,,}" '{companyCode:$c, companyName:"ใหม่", taxId:"", vatRegistered:false,
   branch:{code:"HQ", name:"สำนักงานใหญ่", branchNo:"00000", address:"กรุงเทพฯ", phone:""},
   owner:{name:"เจ้าของ", username:"owner", email:"owner@new.e2e.test", password:"owner1234"}, planId:"pro"}')"
 expect_status 400
 expect_msg "รหัสบริษัทนี้ถูกใช้แล้ว"
 as "$T_P"
 for req in "PUT|/platform/companies/$A/plan|{\"planId\":\"pro\"}" "POST|/platform/companies/$A/suspend|{\"note\":\"x\"}" \
-  "POST|/platform/companies/$A/reactivate|-" "PUT|/platform/companies/$A/owner-password|{\"password\":\"abcd1234\"}" "POST|/platform/companies/$A/purge|-"; do
+  "POST|/platform/companies/$A/reactivate|-" "POST|/platform/companies/$A/owner-setup-link|-" "POST|/platform/companies/$A/purge|-"; do
   IFS='|' read -r m p b <<<"$req"
   call "$m" "$p" "$b"
   check "$m ${p#/platform/companies/$A} → 400 ลบแล้ว" "400 บริษัทนี้ถูกลบข้อมูลแล้ว" "$STATUS $(jq -r .message <<<"$BODY")"

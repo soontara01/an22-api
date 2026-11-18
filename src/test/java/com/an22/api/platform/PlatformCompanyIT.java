@@ -100,15 +100,143 @@ class PlatformCompanyIT extends ApiTest {
     assertThat(platformAudit("company_reactivate")).hasSize(1);
   }
 
+  private static final String INVALID_LINK = "ลิงก์ตั้งรหัสผ่านไม่ถูกต้อง หมดอายุ หรือใช้ไปแล้ว — ขอลิงก์ใหม่";
+
+  private static String newCode() {
+    return "N" + java.util.UUID.randomUUID().toString().replace("-", "").substring(0, 12).toUpperCase();
+  }
+
+  private static Map<String, Object> newCompany(String code) {
+    Map<String, Object> p = new HashMap<>();
+    p.put("companyCode", " " + code.toLowerCase() + " ");
+    p.put("companyName", " บริษัท แอคมี จำกัด ");
+    p.put("taxId", "0105550123451");
+    p.put("vatRegistered", true);
+    p.put("branch", Map.of("code", "hq", "name", "สำนักงานใหญ่", "branchNo", "00000", "address", "กรุงเทพฯ", "phone", ""));
+    p.put("owner", Map.of("name", "สมศักดิ์", "username", "Boss", "email", "boss@acme.test"));
+    p.put("planId", "starter");
+    return p;
+  }
+
+  private static String token(String path) {
+    return path.substring(path.indexOf("token=") + "token=".length());
+  }
+
+  private org.springframework.test.web.servlet.ResultActions reset(String token, String password) throws Exception {
+    return mvc.perform(post("/auth/reset-password").header("X-Real-IP", "198.51.100.77").contentType(MediaType.APPLICATION_JSON)
+        .content(JSON.writeValueAsString(Map.of("token", token, "password", password))));
+  }
+
+  private int loginStatus(String code, String username, String password) throws Exception {
+    return mvc.perform(post("/auth/login").header("X-Real-IP", "198.51.100.78").contentType(MediaType.APPLICATION_JSON)
+            .content(JSON.writeValueAsString(Map.of("companyCode", code, "username", username, "password", password))))
+        .andReturn().getResponse().getStatus();
+  }
+
   @Test
-  void setsTheOwnersPassword() throws Exception {
-    mvc.perform(as(platform, put("/platform/companies/" + c.id() + "/owner-password"), Map.of("password", "12")))
-        .andExpect(status().isBadRequest()).andExpect(content().json(message("รหัสผ่านต้องมีอย่างน้อย 4 ตัว"), true));
+  void createsACompanyWhoseOwnerSetsTheirPasswordWithTheLink() throws Exception {
+    String code = newCode();
+    String trialEnd = LocalDate.now(ClockConfig.BANGKOK).plusDays(14).toString();
+    String owner = login(c.code(), "owner", TestCompanies.PASSWORD);
+    mvc.perform(as(owner, post("/platform/companies"), newCompany(code))).andExpect(status().isUnauthorized());
+    String body = mvc.perform(as(platform, post("/platform/companies"), newCompany(code))).andExpect(status().isOk())
+        .andExpect(jsonPath("$.company.code").value(code)).andExpect(jsonPath("$.company.name").value("บริษัท แอคมี จำกัด"))
+        .andExpect(jsonPath("$.company.status").value("trial")).andExpect(jsonPath("$.company.planId").value("starter"))
+        .andExpect(jsonPath("$.company.subscription.trialEndsOn").value(trialEnd))
+        .andExpect(jsonPath("$.company.owner.username").value("boss")).andExpect(jsonPath("$.company.ownerPasswordSet").value(false))
+        .andExpect(jsonPath("$.company.invoices.length()").value(0))
+        .andExpect(jsonPath("$.setupLink.path").value(Matchers.matchesPattern("^/auth/reset-password\\?token=[A-Za-z0-9_-]{43}$")))
+        .andReturn().getResponse().getContentAsString();
+    var created = JSON.readTree(body);
+    long id = created.path("company").path("id").asLong();
+    String link = token(created.path("setupLink").path("path").asString());
+    // owner ไม่มีรหัสผ่าน: login ไม่ผ่านด้วยรหัสใดก็ตาม
+    Boolean noPassword = sql.platform(jdbc -> jdbc.sql("SELECT password_hash IS NULL FROM dt_users WHERE tenant_id = :t AND role = 'owner'")
+        .param("t", id).query(Boolean.class).single());
+    assertThat(noPassword).isTrue();
+    assertThat(loginStatus(code, "boss", "secret")).isEqualTo(401);
+    // DB เก็บแค่ hash; ลิงก์ setup อายุ 72 ชม.
+    List<String> links = sql.platform(jdbc -> jdbc.sql("SELECT kind || ':' || round(extract(epoch FROM expires_at - now()) / 3600)"
+        + " FROM dt_password_reset_tokens WHERE company_id = :c").param("c", id).query(String.class).list());
+    assertThat(links).containsExactly("setup:72");
+
+    reset(link, "ab").andExpect(status().isBadRequest()).andExpect(content().json(message("รหัสผ่านต้องมีอย่างน้อย 4 ตัว"), true));
+    reset(link, "secret").andExpect(status().isOk());
+    reset(link, "again").andExpect(status().isBadRequest()).andExpect(content().json(message(INVALID_LINK), true));
+    String token = login(code, "boss", "secret");
+    mvc.perform(as(token, get("/payment-methods"))).andExpect(jsonPath("$.length()").value(1)).andExpect(jsonPath("$[0].code").value("CASH"));
+    mvc.perform(as(token, get("/branches"))).andExpect(jsonPath("$[0].code").value("HQ"))
+        .andExpect(jsonPath("$[0].receiptFooter").value("ขอบคุณที่ใช้บริการ"));
+    mvc.perform(as(token, get("/company/onboarding")))
+        .andExpect(content().json("{\"terminals\":0,\"categories\":0,\"products\":0,\"prices\":0,\"users\":1}", true));
+    mvc.perform(as(platform, get("/platform/companies/" + id))).andExpect(jsonPath("$.ownerPasswordSet").value(true));
+    List<String> events = sql.platform(jdbc -> jdbc.sql("SELECT action || '|' || actor_kind || '|' || user_name || '|' || detail"
+        + " FROM dt_audit_log WHERE tenant_id = :t AND action IN ('company_create', 'password_set') ORDER BY id").param("t", id)
+        .query(String.class).list());
+    assertThat(events).containsExactly("company_create|platform|" + PLATFORM_NAME + "|แพ็กเกจ Starter ทดลองใช้ถึง " + trialEnd,
+        "password_set|user|สมศักดิ์|ตั้งรหัสผ่านด้วยลิงก์จากผู้ให้บริการ");
+
+    // รหัสเดิม (ตัวพิมพ์ต่าง) ใช้ไม่ได้อีก — รวมบริษัทที่ถูกลบแล้ว
+    mvc.perform(as(platform, post("/platform/companies"), newCompany(code))).andExpect(status().isBadRequest())
+        .andExpect(content().json(message("รหัสบริษัทนี้ถูกใช้แล้ว"), true));
+    sql.platform(jdbc -> jdbc.sql("UPDATE dt_companies SET deleted_at = now() WHERE id = :id").param("id", id).update());
+    mvc.perform(as(platform, post("/platform/companies"), newCompany(code))).andExpect(content().json(message("รหัสบริษัทนี้ถูกใช้แล้ว"), true));
+  }
+
+  @Test
+  void checksTheNewCompanyInOrder() throws Exception {
+    Map<String, Object> p = newCompany(newCode());
+    p.put("companyName", " ");
+    mvc.perform(as(platform, post("/platform/companies"), p)).andExpect(status().isBadRequest())
+        .andExpect(content().json(message("กรุณากรอกชื่อบริษัท"), true));
+    p = newCompany("ab");
+    mvc.perform(as(platform, post("/platform/companies"), p)).andExpect(content().json(message("รหัสบริษัทใช้ได้เฉพาะ A-Z, 0-9 ยาว 3–20 ตัว"), true));
+    p = newCompany(newCode());
+    p.put("owner", Map.of("name", "ส", "username", "boss", "email", ""));
+    mvc.perform(as(platform, post("/platform/companies"), p))
+        .andExpect(content().json(message("เจ้าของบริษัทต้องมีอีเมล (ใช้กู้รหัสผ่านและแจ้งเรื่องการเก็บเงิน)"), true));
+    p = newCompany(newCode());
+    p.put("planId", "gold");
+    mvc.perform(as(platform, post("/platform/companies"), p)).andExpect(content().json(message("กรุณาเลือกแพ็กเกจ"), true));
+    for (Object days : List.of(91, -1, 1.5)) {
+      p = newCompany(newCode());
+      p.put("trialDays", days);
+      mvc.perform(as(platform, post("/platform/companies"), p)).andExpect(status().isBadRequest())
+          .andExpect(content().json(message("วันทดลองใช้ต้องเป็นจำนวนเต็ม 0–90 วัน"), true));
+    }
+    p = newCompany(newCode());
+    p.remove("branch");
+    mvc.perform(as(platform, post("/platform/companies"), p)).andExpect(status().isBadRequest());
+  }
+
+  @Test
+  void billsAtOnceWithoutATrial() throws Exception {
+    Map<String, Object> p = newCompany(newCode());
+    p.put("trialDays", 0);
+    String today = LocalDate.now(ClockConfig.BANGKOK).toString();
+    mvc.perform(as(platform, post("/platform/companies"), p)).andExpect(status().isOk())
+        .andExpect(jsonPath("$.company.subscription.trialEndsOn").value(Matchers.nullValue()))
+        .andExpect(jsonPath("$.company.invoices.length()").value(1))
+        .andExpect(jsonPath("$.company.invoices[0].periodStart").value(today))
+        .andExpect(jsonPath("$.company.invoices[0].status").value("open"));
+  }
+
+  @Test
+  void aNewSetupLinkEndsTheOldOneAndOwnerPasswordIsGone() throws Exception {
     mvc.perform(as(platform, put("/platform/companies/" + c.id() + "/owner-password"), Map.of("password", "fresh1")))
-        .andExpect(status().isOk()).andExpect(content().string(""));
+        .andExpect(status().isNotFound());
+    String url = "/platform/companies/" + c.id() + "/owner-setup-link";
+    String first = JSON.readTree(mvc.perform(as(platform, post(url))).andExpect(status().isOk())
+        .andExpect(jsonPath("$.expiresAt").isString()).andReturn().getResponse().getContentAsString()).path("path").asString();
+    String second = JSON.readTree(mvc.perform(as(platform, post(url))).andExpect(status().isOk())
+        .andReturn().getResponse().getContentAsString()).path("path").asString();
+    reset(token(first), "fresh1").andExpect(status().isBadRequest()).andExpect(content().json(message(INVALID_LINK), true));
+    reset(token(second), "fresh1").andExpect(status().isOk());
     assertThat(login(c.code(), "owner", "fresh1")).isNotEmpty();
-    assertThat(platformAudit("user_password"))
-        .containsExactly("platform|-|" + PLATFORM_NAME + "|owner|ผู้ให้บริการตั้งรหัสผ่านใหม่ให้เจ้าของบริษัท");
+    assertThat(platformAudit("owner_setup_link")).hasSize(2).allMatch(e -> e.startsWith("platform|-|" + PLATFORM_NAME + "|owner|ลิงก์ใช้ได้ถึง "));
+    mvc.perform(as(platform, post("/platform/companies/999999/owner-setup-link"))).andExpect(status().isNotFound());
+    String owner = login(c.code(), "owner", "fresh1");
+    mvc.perform(as(owner, post(url))).andExpect(status().isUnauthorized());
   }
 
   @Test

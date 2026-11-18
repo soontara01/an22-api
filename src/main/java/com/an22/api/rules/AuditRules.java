@@ -27,7 +27,8 @@ public final class AuditRules {
       "tax_invoice_reissue", "stock_out", "serial_remove", "transfer_cancel", "price_change", "promotion_change", "user_change",
       "user_password", "owner_transfer", "plan_change", "signup", "company_suspend", "company_reactivate", "invoice_paid",
       "company_export", "deletion_request", "deletion_cancel", "password_reset", "menu_access", "company_settings", "branch_settings",
-      "branch_change", "terminal_change", "shift_close_other", "shift_approve", "shift_adjust", "mfa_enable", "mfa_disable", "mfa_reset");
+      "branch_change", "terminal_change", "shift_close_other", "shift_approve", "shift_adjust", "mfa_enable", "mfa_disable", "mfa_reset",
+      "company_create", "owner_setup_link", "password_set");
 
   private AuditRules() {}
 

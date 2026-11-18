@@ -11,7 +11,7 @@ audit_last() { sql "SELECT action || ':' || actor_kind || ':' || coalesce(user_i
 signup() { # tag → $S_CODE $S_ID $S_TOKEN
   S_CODE="E32$1$(openssl rand -hex 2 | tr a-f A-F)"
   local saved=$E2E_TOKEN; as -
-  call POST /auth/signup "$(jq -nc --arg c "$S_CODE" '{companyCode:$c, companyName:("บริษัท " + $c), taxId:"", vatRegistered:false,
+  signup_company "$(jq -nc --arg c "$S_CODE" '{companyCode:$c, companyName:("บริษัท " + $c), taxId:"", vatRegistered:false,
     branch:{code:"HQ", name:"สำนักงานใหญ่", branchNo:"00000", address:"กรุงเทพฯ", phone:""},
     owner:{name:"เจ้าของ", username:"owner", email:("owner@" + ($c | ascii_downcase) + ".e2e.test"), password:"owner1234"}, planId:"pro"}')"
   S_TOKEN=$(jq -r .token <<<"$BODY"); S_ID=$(sql "SELECT id FROM dt_companies WHERE code = '$S_CODE'"); E2E_TOKEN=$saved
@@ -110,19 +110,37 @@ call POST "/platform/companies/$DL/reactivate"
 expect_status 400
 expect_msg "บริษัทอยู่ระหว่างรอลบข้อมูล — ให้เจ้าของบริษัทยกเลิกคำขอลบ"
 
-case_id 32.5 "ตั้งรหัส owner"
-E2E_EXTRA_SECRETS="newowner325"
-call PUT "/platform/companies/$TENANT/owner-password" '{"password":"12"}'
+case_id 32.5 "ลิงก์ตั้งรหัสผ่าน owner (E59 — แทนการตั้งรหัสให้)"
+INVALID_LINK="ลิงก์ตั้งรหัสผ่านไม่ถูกต้อง หมดอายุ หรือใช้ไปแล้ว — ขอลิงก์ใหม่"
+link_token() { jq -r '.path | sub("^.*[?]token="; "")' <<<"$BODY"; }
+call PUT "/platform/companies/$TENANT/owner-password" '{"password":"newowner325"}'
+check "ไม่มี owner-password แล้ว" "yes" "$([[ "$STATUS" == 40[45] ]] && echo yes || echo "no $STATUS")"
+call POST "/platform/companies/$TENANT/owner-setup-link"
+expect_status 200
+L1=$(link_token)
+check "ลิงก์ = path + หมดอายุใน 72 ชม." "/auth/reset-password 72" \
+  "$(jq -r '.path | sub("[?].*"; "")' <<<"$BODY") $(( ($(date -d "$(jq -r .expiresAt <<<"$BODY")" +%s) - $(date +%s) + 1800) / 3600 ))"
+call @api2 POST "/platform/companies/$TENANT/owner-setup-link"
+expect_status 200
+L2=$(link_token)
+E2E_EXTRA_SECRETS="newowner325 $L1 $L2"
+expect_sql "SELECT count(*) FILTER (WHERE used_at IS NULL) || ':' || count(*) FILTER (WHERE kind = 'setup')
+  FROM dt_password_reset_tokens WHERE company_id = $TENANT AND user_id = $U_OWNER" "1:3"   # + ลิงก์ตอนสร้างบริษัท (ใช้แล้ว)
+as -
+call POST /auth/reset-password "$(jq -nc --arg t "$L1" '{token:$t, password:"newowner325"}')"
+check "ลิงก์เก่าใช้ไม่ได้" "400 $INVALID_LINK" "$STATUS $(jq -r .message <<<"$BODY")"
+call POST /auth/reset-password "$(jq -nc --arg t "$L2" '{token:$t, password:"12"}')"
 expect_status 400
 expect_msg "รหัสผ่านต้องมีอย่างน้อย 4 ตัว"
-call PUT "/platform/companies/$TENANT/owner-password" '{"password":"newowner325"}'
+call POST /auth/reset-password "$(jq -nc --arg t "$L2" '{token:$t, password:"newowner325"}')"
 expect_status 200
-check "body ว่าง" "" "$BODY"
+as "$T_P"
 login "$CODE" owner newowner325
 expect_status 200
 login "$CODE" owner owner1234
 expect_status 401
-check "audit user_password" "user_password:platform:null:$P_NAME:owner:ผู้ให้บริการตั้งรหัสผ่านใหม่ให้เจ้าของบริษัท" "$(audit_last "$TENANT" user_password)"
+check "audit owner_setup_link" "owner_setup_link:platform:null:$P_NAME:owner" "$(audit_last "$TENANT" owner_setup_link | cut -d: -f1-5)"
+check "audit password_set" "password_set:user:$U_OWNER:คุณเจ้าของ:owner:ตั้งรหัสผ่านด้วยลิงก์จากผู้ให้บริการ" "$(audit_last "$TENANT" password_set)"
 
 case_id 32.6 "รับชำระใบค้าง"
 INV_ID=$(sql "SELECT id FROM dt_billing_invoices WHERE company_id = $OD"); INV_NO=$(sql "SELECT invoice_no FROM dt_billing_invoices WHERE company_id = $OD")

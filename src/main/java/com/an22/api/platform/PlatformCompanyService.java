@@ -3,16 +3,26 @@ package com.an22.api.platform;
 import com.an22.api.audit.AuditDao;
 import com.an22.api.audit.AuditEntry;
 import com.an22.api.auth.MfaDao;
+import com.an22.api.auth.PasswordResetTokens;
 import com.an22.api.auth.SessionDao.Via;
+import com.an22.api.billing.BillingService;
+import com.an22.api.db.ActorDao;
+import com.an22.api.db.TxActor;
 import com.an22.api.model.BillingInvoice;
+import com.an22.api.model.BranchPayload;
+import com.an22.api.model.NewCompanyPayload;
+import com.an22.api.model.NewCompanyResult;
 import com.an22.api.model.PlatformAdmin;
 import com.an22.api.model.PlatformCompany;
+import com.an22.api.model.SetupLink;
 import com.an22.api.platform.PlatformCompanyDao.CompanyRecord;
 import com.an22.api.rules.AuditRules;
 import com.an22.api.rules.CompanyDataRules;
+import com.an22.api.rules.CompanyRules;
 import com.an22.api.rules.MfaRules;
 import com.an22.api.rules.PlanRules;
 import com.an22.api.rules.PlatformRules;
+import com.an22.api.rules.SignupRules;
 import com.an22.api.rules.SubscriptionRules;
 import com.an22.api.rules.UserRules;
 import com.an22.api.web.ApiException;
@@ -25,7 +35,6 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
-import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -38,19 +47,63 @@ public class PlatformCompanyService {
 
   static final String NOT_FOUND = "ไม่พบบริษัท";
   static final String DELETED = "บริษัทนี้ถูกลบข้อมูลแล้ว";
+  static final String CODE_TAKEN = "รหัสบริษัทนี้ถูกใช้แล้ว";
+  static final String NO_OWNER = "บริษัทนี้ไม่มีเจ้าของบริษัท";
 
   private final PlatformCompanyDao dao;
+  private final NewCompanyDao newCompanies;
   private final AuditDao audit;
-  private final PasswordEncoder passwords;
+  private final ActorDao actors;
+  private final PasswordResetTokens links;
+  private final BillingService billing;
   private final MfaDao mfa;
   private final Clock clock;
 
-  PlatformCompanyService(PlatformCompanyDao dao, AuditDao audit, PasswordEncoder passwords, MfaDao mfa, Clock clock) {
+  PlatformCompanyService(PlatformCompanyDao dao, NewCompanyDao newCompanies, AuditDao audit, ActorDao actors, PasswordResetTokens links,
+      BillingService billing, MfaDao mfa, Clock clock) {
     this.dao = dao;
+    this.newCompanies = newCompanies;
     this.audit = audit;
-    this.passwords = passwords;
+    this.actors = actors;
+    this.links = links;
+    this.billing = billing;
     this.mfa = mfa;
     this.clock = clock;
+  }
+
+  /**
+   * {@code POST /platform/companies} (E59 — ทางเดียวที่สร้างบริษัท; แทน signup E37): ทดลองใช้ {@code trialDays} วัน (0 = ไม่มี — ใบแจ้งหนี้งวดแรก
+   * ออกวันนี้ทันที), ข้อมูลบริษัท, สาขาแรก, owner ที่ยังไม่มีรหัสผ่าน, ช่องทางเงินสด — คืนหน้าบริษัท + ลิงก์ตั้งรหัสผ่านของ owner (แสดงครั้งเดียว).
+   * รหัสเคยใช้ (รวมบริษัทที่ลบแล้ว) → 400.
+   */
+  @Transactional("platformTx")
+  public NewCompanyResult create(PlatformAdmin admin, NewCompanyPayload in) {
+    NewCompanyPayload p = SignupRules.normalize(in);
+    badRequest(SignupRules.newCompanyError(p));
+    String code = CompanyRules.normalizeCompanyCode(p.companyCode());
+    if (newCompanies.codeTaken(code)) {
+      throw ApiException.badRequest(CODE_TAKEN);
+    }
+    LocalDate today = LocalDate.now(clock);
+    LocalDate trialEndsOn = p.trialDays() > 0 ? today.plusDays(p.trialDays()) : null;
+    // สร้างพร้อมกันด้วยรหัสเดียวกัน: unique ของ code ตัดสิน
+    long companyId = newCompanies.insertCompany(code, p.planId(), trialEndsOn, trialEndsOn == null ? today : trialEndsOn.plusDays(1))
+        .orElseThrow(() -> ApiException.badRequest(CODE_TAKEN));
+    actors.becomeOnPlatform(new TxActor(companyId, admin.id(), "platform"));
+    NewCompanyPayload.Owner o = p.owner();
+    long ownerId = newCompanies.insertOwner(UserRules.normalizeUsername(o.username()), o.name().strip(), o.email().strip());
+    newCompanies.insertCompanyInfo(p.companyName(), p.taxId(), p.vatRegistered());
+    BranchPayload b = p.branch();
+    newCompanies.insertBranch(CompanyRules.normalizeBranch(CompanyRules.branchDefaults(),
+        new BranchPayload(b.code(), b.name(), b.branchNo(), b.address(), b.phone(), CompanyRules.DEFAULT_RECEIPT_FOOTER, true)));
+    newCompanies.insertCashMethod();
+    CompanyRecord c = dao.find(companyId).orElseThrow();
+    record(admin, c, "company_create", "company", companyId, code, "แพ็กเกจ " + PlanRules.planOf(p.planId()).name() + " "
+        + (trialEndsOn == null ? "ไม่มีช่วงทดลองใช้" : "ทดลองใช้ถึง " + trialEndsOn));
+    SetupLink link = links.issueSetup(companyId, ownerId);
+    // ไม่มีช่วงทดลอง: ออกใบแจ้งหนี้งวดแรกตอนนี้เลย (ไม่รอ job / login — เหมือน mock)
+    billing.catchUpIn(companyId);
+    return new NewCompanyResult(detail(companyId), link);
   }
 
   /** {@code GET /platform/companies}: ทุกบริษัท (รวมที่ลบแล้ว) เรียงตาม id. */
@@ -99,15 +152,17 @@ public class PlatformCompanyService {
     return detail(id);
   }
 
-  /** {@code PUT /platform/companies/:id/owner-password}: ตั้งรหัสผ่านใหม่ให้ owner (owner ลืมรหัส + อีเมลใช้ไม่ได้). */
+  /**
+   * {@code POST /platform/companies/:id/owner-setup-link} (E59 — แทน {@code owner-password}: platform ไม่พิมพ์ / ไม่รู้รหัสผ่านลูกค้า): ลิงก์ใหม่ให้
+   * owner ที่ใช้งานอยู่ — ลิงก์ที่ยังไม่ใช้ของ owner คนนั้นใช้ไม่ได้ทันที; ใช้ได้ทั้งตั้งครั้งแรกและเจ้าของลืมรหัส (ยืนยันตัวตนก่อน).
+   */
   @Transactional("platformTx")
-  public void ownerPassword(PlatformAdmin admin, long id, String passwordIn) {
+  public SetupLink ownerSetupLink(PlatformAdmin admin, long id) {
     CompanyRecord c = writable(id);
-    String password = passwordIn == null ? "" : passwordIn;
-    badRequest(UserRules.passwordError(password));
-    PlatformCompany.Owner owner = dao.owner(id).orElseThrow(() -> ApiException.badRequest("บริษัทนี้ไม่มีเจ้าของบริษัท"));
-    dao.setOwnerPassword(id, owner.id(), passwords.encode(password));
-    record(admin, c, "user_password", "user", owner.id(), owner.username(), "ผู้ให้บริการตั้งรหัสผ่านใหม่ให้เจ้าของบริษัท");
+    PlatformCompany.Owner owner = dao.activeOwner(id).orElseThrow(() -> ApiException.badRequest(NO_OWNER));
+    SetupLink link = links.issueSetup(id, owner.id());
+    record(admin, c, "owner_setup_link", "user", owner.id(), owner.username(), "ลิงก์ใช้ได้ถึง " + link.expiresAt());
+    return link;
   }
 
   /**
@@ -171,7 +226,9 @@ public class PlatformCompanyService {
     List<BillingInvoice> invoices = dao.invoicesOf(c.id());
     PlatformCompany.Row row = row(c, invoices, LocalDate.now(clock));
     List<BillingInvoice> newestFirst = invoices.stream().sorted(Comparator.comparingLong(BillingInvoice::id).reversed()).toList();
-    return PlatformCompany.Detail.of(row, newestFirst, c.deletedAt() == null ? dao.owner(c.id()).orElse(null) : null, c.suspendNote());
+    boolean deleted = c.deletedAt() != null;
+    return PlatformCompany.Detail.of(row, newestFirst, deleted ? null : dao.owner(c.id()).orElse(null),
+        !deleted && dao.ownerPasswordSet(c.id()), c.suspendNote());
   }
 
   private static PlatformCompany.Row row(CompanyRecord c, List<BillingInvoice> invoices, LocalDate today) {

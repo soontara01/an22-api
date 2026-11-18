@@ -85,8 +85,37 @@ call() {
   cat "$work/out"
 }
 
+db() { "${compose[@]}" exec -T db psql -qAtX -v ON_ERROR_STOP=1 -U postgres -d an22 -c "$1" </dev/null; }
+
+# totp SECRET → รหัส 6 หลักตอนนี้ (RFC 6238 แบบ Microsoft Authenticator — E55)
+totp() {
+  python3 -I -c 'import sys,hmac,hashlib,base64,struct,time
+s=sys.argv[1]; k=base64.b32decode(s+"="*(-len(s)%8)); c=int(time.time())//30
+h=hmac.new(k,struct.pack(">Q",c),hashlib.sha1).digest(); o=h[19]&15
+print("%06d"%((struct.unpack(">I",h[o:o+4])[0]&0x7fffffff)%1000000))' "$1"
+}
+
+# ทุก login ต้องผ่าน Microsoft Authenticator (E56 / E57): ล้าง secret ด้วย SQL ก่อน → ได้ setup + secret → ส่งรหัสต่อ → token
+# shop_login BASE CODE USER PASS → token ร้าน (ว่าง = ไม่ผ่าน)
+shop_login() {
+  db "DELETE FROM dt_user_mfa m USING dt_users u, dt_companies c WHERE m.tenant_id = u.tenant_id AND m.user_id = u.id
+    AND u.tenant_id = c.id AND c.code = '$2' AND u.username = '$3'" >/dev/null
+  local step
+  step=$(call "$1" POST /auth/login "" "$(jq -nc --arg c "$2" --arg u "$3" --arg p "$4" '{companyCode:$c, username:$u, password:$p}')")
+  call "$1" POST /auth/mfa/verify "$(jq -r '.challenge // empty' <<<"$step")" \
+    "{\"code\":\"$(totp "$(jq -r '.setup.secret // empty' <<<"$step")")\"}" | jq -r '.token // empty'
+}
+# platform_login BASE → token ของ platform (`platform` / `platform` ของ seed)
+platform_login() {
+  db "DELETE FROM dt_platform_admin_mfa WHERE admin_id = (SELECT id FROM dt_platform_admins WHERE username = 'platform')" >/dev/null
+  local step
+  step=$(call "$1" POST /platform/auth/login "" '{"username":"platform","password":"platform"}')
+  call "$1" POST /platform/auth/mfa/verify "$(jq -r '.challenge // empty' <<<"$step")" \
+    "{\"code\":\"$(totp "$(jq -r '.setup.secret // empty' <<<"$step")")\"}" | jq -r '.token // empty'
+}
+
 echo "== 1) token ข้าม instance"
-token=$(call "$API1" POST /auth/login "" '{"companyCode":"DEMO","username":"admin","password":"admin"}' | jq -r .token)
+token=$(shop_login "$API1" DEMO admin admin)
 me=$(call "$API2" GET /me "$token")
 if [[ "$(cat "$status_file")" == 200 && "$(jq -r .company.code <<<"$me")" == DEMO ]]; then
   ok "login ที่ api1 → GET /me ที่ api2 = 200 (DEMO)"
@@ -98,13 +127,19 @@ upstreams=$(for _ in 1 2 3 4; do curl -s -o /dev/null -D - "$LB/healthz" | tr -d
 
 echo "== 2) ขายพร้อมกันจาก 2 instance"
 code="M$(openssl rand -hex 5 | tr a-f A-F)"
-signup=$(jq -n --arg code "$code" '{companyCode:$code, companyName:"บริษัท ทดสอบหลายเครื่อง", taxId:"", vatRegistered:false,
+# บริษัทใหม่สร้างได้ทางเดียวคือ platform (E59): สร้าง → ตั้งรหัส owner ด้วยลิงก์ setup → login owner
+new_company=$(jq -n --arg code "$code" '{companyCode:$code, companyName:"บริษัท ทดสอบหลายเครื่อง", taxId:"", vatRegistered:false,
   branch:{code:"HQ", name:"สำนักงานใหญ่", branchNo:"00000", address:"กรุงเทพ", phone:""},
-  owner:{name:"เจ้าของ", username:"owner", email:"owner@multi.test", password:"secret"}, planId:"pro"}')
-res=$(call "$LB" POST /auth/signup "" "$signup")
-owner=$(jq -r .token <<<"$res")
-branch=$(jq -r '.branches[0].id' <<<"$res")
-[[ "$owner" != null ]] || { bad "signup ไม่ผ่าน: $res"; exit 1; }
+  owner:{name:"เจ้าของ", username:"owner", email:"owner@multi.test"}, planId:"pro"}')
+res=$(call "$LB" POST /platform/companies "$(platform_login "$LB")" "$new_company")
+setup=$(jq -r '.setupLink.path // empty | sub("^.*[?]token="; "")' <<<"$res")
+[[ -n "$setup" ]] || { bad "สร้างบริษัทไม่ผ่าน: $res"; exit 1; }
+call "$API2" POST /auth/reset-password "" "$(jq -nc --arg t "$setup" '{token:$t, password:"secret"}')" >/dev/null
+[[ "$(cat "$status_file")" == 200 ]] || { bad "ตั้งรหัส owner ด้วยลิงก์ไม่ผ่าน ($(cat "$status_file"))"; exit 1; }
+owner=$(shop_login "$LB" "$code" owner secret)
+[[ -n "$owner" ]] || { bad "owner login ไม่ผ่าน"; exit 1; }
+branch=$(call "$API1" GET /branches "$owner" | jq -r '.[0].id')
+ok "platform สร้างบริษัท $code → owner ตั้งรหัสด้วยลิงก์ (api2) → login ผ่าน lb"
 call "$API1" POST /pos-terminals "$owner" "{\"id\":1,\"name\":\"เครื่อง 1\",\"posId\":\"\",\"branchId\":$branch,\"active\":true}" >/dev/null
 cat=$(call "$API2" POST /categories "$owner" '{"code":"C","name":"หมวด","active":true}' | jq -r .id)
 product=$(call "$API1" POST /products "$owner" "{\"sku\":\"P1\",\"name\":\"สินค้า\",\"categoryId\":$cat,\"unit\":\"ชิ้น\",\"serialControl\":false,\"serialPrefix\":\"\"}" \

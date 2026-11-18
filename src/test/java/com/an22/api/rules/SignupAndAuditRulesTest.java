@@ -5,7 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.an22.api.model.Branch;
 import com.an22.api.model.BranchPayload;
 import com.an22.api.model.CompanyInfo;
-import com.an22.api.model.SignupPayload;
+import com.an22.api.model.NewCompanyPayload;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
@@ -14,20 +14,30 @@ import org.junit.jupiter.api.Test;
 /** ตาม {@code signup.model.spec.ts}, {@code company-data.model.spec.ts} และ {@code parseAuditQuery} ของ {@code audit.model.spec.ts}. */
 class SignupAndAuditRulesTest {
 
-  private static SignupPayload valid() {
-    return new SignupPayload("acme", "บริษัท แอคมี จำกัด", "0105550123451", true,
+  private static NewCompanyPayload valid() {
+    return new NewCompanyPayload("acme", "บริษัท แอคมี จำกัด", "0105550123451", true,
         new BranchPayload("HQ", "สำนักงานใหญ่", "00000", "กรุงเทพฯ", "", null, null),
-        new SignupPayload.Owner("สมศักดิ์", "boss", "boss@acme.test", "secret"), "starter");
+        new NewCompanyPayload.Owner("สมศักดิ์", "boss", "boss@acme.test"), "starter", 14);
   }
 
-  private static String error(SignupPayload p) {
-    return SignupRules.signupError(SignupRules.normalize(p));
+  private static String error(NewCompanyPayload p) {
+    return SignupRules.newCompanyError(SignupRules.normalize(p));
   }
 
-  private static SignupPayload withOwner(String name, String email, String password) {
-    SignupPayload v = valid();
-    return new SignupPayload(v.companyCode(), v.companyName(), v.taxId(), v.vatRegistered(), v.branch(),
-        new SignupPayload.Owner(name, "boss", email, password), v.planId());
+  private static NewCompanyPayload with(String companyName, String taxId, boolean vat, BranchPayload branch, String planId) {
+    NewCompanyPayload v = valid();
+    return new NewCompanyPayload(v.companyCode(), companyName, taxId, vat, branch, v.owner(), planId, v.trialDays());
+  }
+
+  private static NewCompanyPayload withOwner(String name, String email) {
+    NewCompanyPayload v = valid();
+    return new NewCompanyPayload(v.companyCode(), v.companyName(), v.taxId(), v.vatRegistered(), v.branch(),
+        new NewCompanyPayload.Owner(name, "boss", email), v.planId(), v.trialDays());
+  }
+
+  private static NewCompanyPayload withTrial(Integer days) {
+    NewCompanyPayload v = valid();
+    return new NewCompanyPayload(v.companyCode(), v.companyName(), v.taxId(), v.vatRegistered(), v.branch(), v.owner(), v.planId(), days);
   }
 
   @Test
@@ -40,23 +50,30 @@ class SignupAndAuditRulesTest {
 
   @Test
   void checksCompanyFirstBranchOwnerAndPackageInThatOrder() {
-    SignupPayload v = valid();
+    NewCompanyPayload v = valid();
     assertThat(error(v)).isNull();
-    assertThat(error(new SignupPayload(v.companyCode(), " ", v.taxId(), true, v.branch(), v.owner(), v.planId())))
-        .isEqualTo("กรุณากรอกชื่อบริษัท");
-    assertThat(error(new SignupPayload(v.companyCode(), v.companyName(), "123", true, v.branch(), v.owner(), v.planId())))
+    assertThat(error(with(" ", v.taxId(), true, v.branch(), v.planId()))).isEqualTo("กรุณากรอกชื่อบริษัท");
+    assertThat(error(with(v.companyName(), "123", true, v.branch(), v.planId())))
         .isEqualTo("เลขประจำตัวผู้เสียภาษีต้องเป็น 13 หลักที่ถูกต้อง");
-    assertThat(error(new SignupPayload(v.companyCode(), v.companyName(), "", false, v.branch(), v.owner(), v.planId()))).isNull();
-    assertThat(error(new SignupPayload(v.companyCode(), v.companyName(), v.taxId(), true,
-        new BranchPayload("HQ", "สำนักงานใหญ่", "1", "กรุงเทพฯ", "", null, null), v.owner(), v.planId()))).isNotNull();
-    assertThat(error(withOwner("", "boss@acme.test", "secret"))).isEqualTo("กรุณากรอกชื่อเจ้าของบริษัท");
-    assertThat(error(withOwner("สมศักดิ์", "", "secret")))
-        .isEqualTo("เจ้าของบริษัทต้องมีอีเมล (ใช้กู้รหัสผ่านและแจ้งเรื่องการเก็บเงิน)");
-    assertThat(error(withOwner("สมศักดิ์", "boss@acme.test", "12"))).isEqualTo("รหัสผ่านต้องมีอย่างน้อย 4 ตัว");
-    assertThat(error(new SignupPayload(v.companyCode(), v.companyName(), v.taxId(), true, v.branch(), v.owner(), "gold")))
-        .isEqualTo("กรุณาเลือกแพ็กเกจ");
+    assertThat(error(with(v.companyName(), "", false, v.branch(), v.planId()))).isNull();
+    assertThat(error(with(v.companyName(), v.taxId(), true,
+        new BranchPayload("HQ", "สำนักงานใหญ่", "1", "กรุงเทพฯ", "", null, null), v.planId()))).isNotNull();
+    assertThat(error(withOwner("", "boss@acme.test"))).isEqualTo("กรุณากรอกชื่อเจ้าของบริษัท");
+    assertThat(error(withOwner("สมศักดิ์", ""))).isEqualTo("เจ้าของบริษัทต้องมีอีเมล (ใช้กู้รหัสผ่านและแจ้งเรื่องการเก็บเงิน)");
+    assertThat(error(with(v.companyName(), v.taxId(), true, v.branch(), "gold"))).isEqualTo("กรุณาเลือกแพ็กเกจ");
     // ไม่ส่งอะไรเลย = ค่าว่าง (ไม่ใช่ error 500)
-    assertThat(error(new SignupPayload(null, null, null, null, null, null, null))).isEqualTo("กรุณากรอกรหัสบริษัท");
+    assertThat(error(new NewCompanyPayload(null, null, null, null, null, null, null, null))).isEqualTo("กรุณากรอกรหัสบริษัท");
+  }
+
+  @Test
+  void takesZeroToNinetyWholeTrialDays() {
+    assertThat(error(withTrial(0))).isNull();
+    assertThat(error(withTrial(90))).isNull();
+    // ไม่ส่ง = TRIAL_DAYS
+    assertThat(SignupRules.normalize(withTrial(null)).trialDays()).isEqualTo(SubscriptionRules.TRIAL_DAYS);
+    for (int days : new int[] {-1, 91, com.an22.api.model.IntegerOrInvalid.INVALID}) {
+      assertThat(error(withTrial(days))).isEqualTo("วันทดลองใช้ต้องเป็นจำนวนเต็ม 0–90 วัน");
+    }
   }
 
   @Test
@@ -75,7 +92,7 @@ class SignupAndAuditRulesTest {
     assertThat(AuditRules.parseAuditQuery("2026-02-30", null, null, "2.0", "1d").from()).isNull();
     assertThat(AuditRules.parseAuditQuery(null, null, null, "2.0", "1d"))
         .isEqualTo(new AuditRules.Query(null, null, null, 2L, null));
-    assertThat(AuditRules.ACTIONS).hasSize(34);
+    assertThat(AuditRules.ACTIONS).hasSize(37);
     // แบบ Number(): exponent / ทศนิยม .0 / เครื่องหมาย ได้; ไม่ใช่จำนวนเต็ม / ยาวเกิน / เกิน MAX_SAFE_INTEGER = ไม่กรอง
     assertThat(AuditRules.parseAuditQuery(null, null, null, " +1e2 ", "-0").userId()).isEqualTo(100L);
     assertThat(AuditRules.parseAuditQuery(null, null, null, null, "-0").branchId()).isZero();
