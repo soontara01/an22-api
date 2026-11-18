@@ -49,7 +49,7 @@ expect_sql "SELECT action || ':' || user_id || ':' || detail FROM dt_audit_log W
 
 case_id 29.2 "เนื้อหา"
 tables=$(sql "SELECT string_agg(DISTINCT table_name, ' ') FROM information_schema.columns WHERE table_schema = 'public' AND column_name = 'tenant_id'
-  AND table_name LIKE 'dt\_%' AND table_name <> 'dt_doc_counters'")
+  AND table_name LIKE 'dt\_%' AND table_name NOT IN ('dt_doc_counters', 'dt_user_mfa')")   # secret Authenticator ไม่อยู่ใน export (E55)
 camel() { sed -E 's/^dt_//; s/_([a-z0-9])/\U\1/g' <<<"$1"; }
 want="" ; got=""
 for t in $tables; do
@@ -58,6 +58,8 @@ for t in $tables; do
   got+="$(camel "$t")=$(jq -r --arg k "$(camel "$t")" '.data[$k] | length' <<<"$EXPORT") "
 done
 check "ทุกตารางที่มี tenant_id: จำนวนแถว = DB ($(wc -w <<<"$tables") ตาราง)" "$want" "$got"
+check "ไม่มี secret Authenticator ใน export (E55)" "0 $(sql "SELECT count(*) > 0 FROM dt_user_mfa WHERE tenant_id = $TENANT")" \
+  "$(jq -r '.data.userMfa // [] | length' <<<"$EXPORT") t"
 check "billingInvoices = ของบริษัทนี้เท่านั้น" "$(sql "SELECT count(*) FROM dt_billing_invoices WHERE company_id = $TENANT") 1" \
   "$(jq -r '.data.billingInvoices | length' <<<"$EXPORT") $(sql "SELECT count(*) FROM dt_billing_invoices WHERE company_id = $TENANT")"
 check "ไม่มี docCounters / tenantId" "false 0" "$(jq -r '.data | has("docCounters")' <<<"$EXPORT") $(grep -o '"tenantId"' "$E2E_WORK/export.json" | grep -c . || true)"
