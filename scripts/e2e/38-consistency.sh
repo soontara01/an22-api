@@ -110,8 +110,10 @@ info "counter / เอกสารที่ตรวจ" "SELECT (SELECT count(*
 
 case_id 38.6 "audit"
 ACTIONS=$(sql "SELECT string_agg(a, ' ') FROM (SELECT unnest(regexp_matches(pg_get_constraintdef(oid), '''([a-z_]+)''', 'g')) a FROM pg_constraint WHERE conname = 'dt_audit_log_action_check') x")
-n_all=$(wc -w <<<"$ACTIONS")
-missing=$(sql "SELECT coalesce(string_agg(a, ', ' ORDER BY a), '') FROM unnest(string_to_array('$ACTIONS', ' ')) a WHERE NOT EXISTS (SELECT 1 FROM dt_audit_log l WHERE l.action = a)")
+# action เดิมที่คงไว้ใน CHECK เพื่อประวัติ — ไม่เกิดอีกแล้ว: signup (E59 ไม่มีสมัครเอง), mfa_disable (E57 ปิดเองไม่ได้)
+LEGACY="'signup', 'mfa_disable'"
+n_all=$(( $(wc -w <<<"$ACTIONS") - 2 ))
+missing=$(sql "SELECT coalesce(string_agg(a, ', ' ORDER BY a), '') FROM unnest(string_to_array('$ACTIONS', ' ')) a WHERE a NOT IN ($LEGACY) AND NOT EXISTS (SELECT 1 FROM dt_audit_log l WHERE l.action = a)")
 check "action ที่เกิดขึ้นครบทั้ง $n_all ชนิด (จากทุกข้อรวมกัน)" "" "$missing"
 info "จำนวนต่อ action" "SELECT string_agg(action || ' ' || n, ', ' ORDER BY action) FROM (SELECT action, count(*) n FROM dt_audit_log GROUP BY 1) x"
 none "user_id ของ audit (actor user) ไม่เป็นผู้ใช้ของบริษัทอื่น" "

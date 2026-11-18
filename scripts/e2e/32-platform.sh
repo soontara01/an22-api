@@ -137,6 +137,11 @@ expect_status 200
 as "$T_P"
 login "$CODE" owner newowner325
 expect_status 200
+# E58: platform ล้าง Authenticator ของ owner (เพิ่งผูกตอน login นี้ — login ครั้งถัดไปของ helper ล้างก่อนเสมอ) — ผูกใหม่ตอน login ครั้งถัดไป
+call POST "/platform/companies/$TENANT/mfa-reset" '{"username":" Owner "}'
+expect_status 200
+expect_sql "SELECT count(*) FROM dt_user_mfa WHERE tenant_id = $TENANT AND user_id = $U_OWNER" 0
+check "audit mfa_reset" "mfa_reset:platform:null:$P_NAME:owner:ผู้ให้บริการล้าง Microsoft Authenticator ให้" "$(audit_last "$TENANT" mfa_reset)"
 login "$CODE" owner owner1234
 expect_status 401
 check "audit owner_setup_link" "owner_setup_link:platform:null:$P_NAME:owner" "$(audit_last "$TENANT" owner_setup_link | cut -d: -f1-5)"

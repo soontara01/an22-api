@@ -9,7 +9,7 @@ for base in "$API1" "$API2" "$LB"; do
   check "GET $base/readyz" 200 "$(curl -s -o /dev/null -w '%{http_code}' "$base/readyz")"
 done
 expect_sql "SELECT string_agg(version, ',' ORDER BY installed_rank) FROM flyway_schema_history WHERE version IS NOT NULL" \
-  "1,1.1,2,3,3.1,4,4.1,5,5.1,6,7,8,8.1,9"
+  "1,1.1,2,3,3.1,4,4.1,5,5.1,6,7,8,8.1,9,10,11,12,13"
 expect_sql "SELECT count(*) FILTER (WHERE NOT success) FROM flyway_schema_history" 0
 got=$(as_app "" "SELECT count(*) > 0 FROM flyway_schema_history" || true)
 check "an22_app อ่าน flyway_schema_history (grant ของ afterMigrate)" t "$got"
@@ -48,7 +48,7 @@ expect_sql "SELECT count(*) || ':' || string_agg(DISTINCT status, ',') || ':' ||
   FROM dt_serial_numbers WHERE tenant_id = $t" "5:in_stock:20000.0000"
 expect_sql "SELECT count(*) || ':' || string_agg(DISTINCT type, ',') FROM dt_stock_movements WHERE tenant_id = $t" "5:receive"
 expect_sql "SELECT string_agg(action || '=' || n, ',' ORDER BY action) FROM (SELECT action, count(*) n FROM dt_audit_log
-  WHERE tenant_id = $t GROUP BY action) a" "branch_change=1,price_change=5,signup=1,terminal_change=3,user_change=4"
+  WHERE tenant_id = $t GROUP BY action) a" "branch_change=1,company_create=1,login=1,mfa_enable=1,password_set=1,price_change=5,terminal_change=3,user_change=4"
 expect_sql "SELECT string_agg(username || ':' || role || ':' || all_branches, ',' ORDER BY id) FROM dt_users WHERE tenant_id = $t" \
   "owner:owner:true,boss:admin:true,mgr:admin:false,cash1:user:false,cash2:user:false"
 expect_sql "SELECT vat_registered || ':' || require_shift || ':' || manual_discount_max_percent || ':' || exchange_days || ':'
